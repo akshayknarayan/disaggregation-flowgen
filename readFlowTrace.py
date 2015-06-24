@@ -22,7 +22,7 @@ def outputSimulatorFriendly(flows):
     template = "{} {} 0 0 {} 0 0 {} {}"
     for f in flows:
         #print f['size'], f['size']/1460, np.ceil(f['size']/1460)
-        print template.format(f['id'], f['time']/1e6 + 1.0, int(np.ceil(f['size']/1460)), f['src'], f['dst'])
+        print template.format(f['id'], "%.9f" % (f['time']/1e6 + 1.0), int(np.ceil(f['size']/1460)), f['src'], f['dst'])
 
 def sliceByTime(flows):
     flows.sort(key = lambda x: x['time'])

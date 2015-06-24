@@ -3,8 +3,7 @@
 import sys
 import subprocess
 import itertools
-
-import pdb
+import random
 
 import numpy as np
 
@@ -56,7 +55,7 @@ def readDiskTrace(diskFilename, tsFilename, node):
     f = open(tsFilename, 'r')
     offset = float(f.read())
     f.close()
-    out = subprocess.check_output("blkparse {0} | grep java | python ../rmem/get_disk_io.py".format(diskFilename), shell = True)
+    out = subprocess.check_output("blkparse {0} | grep java | python get_disk_io.py".format(diskFilename), shell = True)
     out = out.split("\n")
     return list(itertools.ifilter((lambda x:x is not None), (readDiskLine(line, offset, node) for line in out)))
 
@@ -113,52 +112,81 @@ def getFlowInfo(nodes):
     print 'mem', smallestMemAddress, largestMemAddress, memoryRange
     print 'disk', smallestDiskAddress, largestDiskAddress, diskRange
 
-    return makeFlows(nodes, memoryRange, onlyMem, diskRange, onlyDisk, earliestTime)
+    return memoryRange, onlyMem, diskRange, onlyDisk, earliestTime
 
-def makeFlows(nodes, memoryRange, onlyMem, diskRange, onlyDisk, earliestTime):
-    numMemoryNodes = len(nodes)
-    numDiskNodes = len(nodes)
+def makeFlows(nodes):
+    memoryRange, onlyMem, diskRange, onlyDisk, earliestTime = getFlowInfo(nodes)
+    hosts = random.sample(xrange(144), len(nodes))
 
-    # nodes: CPUs 0-9, Memory 10-19, Disk 20-29
     def whichMem(addr):
-        return int(addr/(memoryRange/numMemoryNodes)) + 10
+        return int(addr/(memoryRange/len(nodes))) % 10
     def whichDisk(addr):
-        return int(addr/(diskRange/numDiskNodes)) + 20
+        return int(addr/(diskRange/len(nodes))) % 10
 
     flows = []
     for mem in onlyMem:
         if (mem['rw'] == 'r'):
-            src = whichMem(mem['addr'])
-            dst = mem['node']
+            src = hosts[whichMem(mem['addr'])]
+            dst = hosts[mem['node']]
             typ = "memRead"
         else:
-            src = mem['node']
-            dst = whichMem(mem['addr'])
+            src = hosts[mem['node']]
+            dst = hosts[whichMem(mem['addr'])]
             typ = "memWr"
+        if (src == dst):
+            continue
         flows.append({'time':mem['time'] - earliestTime, 'src':src, 'dst':dst, 'size':mem['length'], 'type':typ})
     for disk in onlyDisk:
         if (disk['rw'] == 'r'):
-            src = whichDisk(disk['addr'])
-            dst = disk['node']
+            src = hosts[whichDisk(disk['addr'])]
+            dst = hosts[disk['node']]
             typ = "diskRead"
         else:
-            src = disk['node']
-            dst = whichDisk(disk['addr'])
+            src = hosts[disk['node']]
+            dst = hosts[whichDisk(disk['addr'])]
             typ = "diskWr"
+        if (src == dst):
+            continue
         flows.append({'time':disk['time'] - earliestTime, 'src':src, 'dst':dst, 'size':disk['length'], 'type':typ})
     return flows
+
+# if two flows have the same source and destination and start within epsilon of each other, combine them.
+def collapseFlows(flows):
+    epsilon = 5e-6
+    def combine(fs):
+        time = fs[0]['time']
+        src = fs[0]['src']
+        dst = fs[0]['dst']
+        typ = fs[0]['type']
+        totalSize = sum(f['size'] for f in fs)
+        return {'time':time, 'src':src, 'dst':dst, 'type':typ, 'size':totalSize}
+
+    def flowReducer(fs):
+        time = fs[0]['time']
+        src = fs[0]['src']
+        dst = fs[0]['dst']
+        typ = fs[0]['type']
+        pred = lambda f:(f['type'] == typ and f['src'] == src and f['dst'] == dst and abs(f['time'] - time) < epsilon)
+        burst = itertools.takewhile(pred, fs)
+        leftover = itertools.dropwhile(pred, fs)
+        return combine(burst) + flowReducer(leftover)
+
+    flows.sort(key = lambda f:f['time'])
+    fs = flowReducer(flows)
+    print 'collapsed', len(flows) - len(fs), 'flows'
+    return fs
+
 
 if __name__ == '__main__':
     if (len(sys.argv) < 2):
         print 'Usage: python makeFlowTrace.py <spark IO traces...>'
         sys.exit(1)
     nodes = readFiles(sys.argv[1:])
-    flows = getFlowInfo(nodes)
-    flows.sort(key = lambda f:f['time'])
-    print len(flows)
+    flows = makeFlows(nodes)
+    flows = collapseFlows(flows)
     fid = 0
     with open('flows.txt', 'w') as of:
         for f in flows:
-            of.write("{0} {1} {2} {3} {4} {5}\n".format(fid, f['time'], f['src'], f['dst'], f['size'], f['type']))
+            of.write("{0} {1} {2} {3} {4} {5}\n".format(fid, "%.9f" % f['time'], f['src'], f['dst'], f['size'], f['type']))
             fid += 1
 
