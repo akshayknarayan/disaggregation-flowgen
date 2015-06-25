@@ -46,7 +46,7 @@ if __name__ == '__main__':
     #print 'Histogram'
     #print hist
 
-    byTime = sliceByTime(flows)
+    #byTime = sliceByTime(flows)
     #print 'by time'
     #print map(len, byTime)
 

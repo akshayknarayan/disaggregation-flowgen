@@ -154,28 +154,21 @@ def makeFlows(nodes):
 def collapseFlows(flows):
     epsilon = 5e-6
     def combine(fs):
-        time = fs[0]['time']
-        src = fs[0]['src']
-        dst = fs[0]['dst']
-        typ = fs[0]['type']
-        totalSize = sum(f['size'] for f in fs)
+        first = next(fs)
+        time = first['time']
+        src = first['src']
+        dst = first['dst']
+        typ = first['type']
+        totalSize = first['size'] + sum(f['size'] for f in fs)
         return {'time':time, 'src':src, 'dst':dst, 'type':typ, 'size':totalSize}
 
-    def flowReducer(fs):
-        time = fs[0]['time']
-        src = fs[0]['src']
-        dst = fs[0]['dst']
-        typ = fs[0]['type']
-        pred = lambda f:(f['type'] == typ and f['src'] == src and f['dst'] == dst and abs(f['time'] - time) < epsilon)
-        burst = itertools.takewhile(pred, fs)
-        leftover = itertools.dropwhile(pred, fs)
-        return combine(burst) + flowReducer(leftover)
-
-    flows.sort(key = lambda f:f['time'])
-    fs = flowReducer(flows)
-    print 'collapsed', len(flows) - len(fs), 'flows'
-    return fs
-
+    keyfunc = lambda f:",".join(map(str,(f['type'], f['src'], f['dst'], int(f['time']))))
+    flows.sort(key = keyfunc)
+    collapsed = []
+    for k, g in itertools.groupby(flows, keyfunc):
+        collapsed.append(combine(g))
+    collapsed.sort(key = lambda f:f['time'])
+    return collapsed
 
 if __name__ == '__main__':
     if (len(sys.argv) < 2):
@@ -183,10 +176,12 @@ if __name__ == '__main__':
         sys.exit(1)
     nodes = readFiles(sys.argv[1:])
     flows = makeFlows(nodes)
+    uncollapsed_len = len(flows)
     flows = collapseFlows(flows)
     fid = 0
     with open('flows.txt', 'w') as of:
         for f in flows:
             of.write("{0} {1} {2} {3} {4} {5}\n".format(fid, "%.9f" % f['time'], f['src'], f['dst'], f['size'], f['type']))
             fid += 1
-
+    print uncollapsed_len, fid
+    print 'collapsed', uncollapsed_len - fid, 'flows'
