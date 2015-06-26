@@ -87,86 +87,83 @@ def readFiles(fileNames):
 
     return nodes
 
-def getFlowInfo(nodes):
-    onlyMem = list(itertools.chain.from_iterable(nodes[i]['mem'] for i in nodes))
-    onlyDisk = list(itertools.chain.from_iterable(nodes[i]['disk'] for i in nodes))
-    allFlows = list(itertools.chain.from_iterable(nodes[i]['mem'] + nodes[i]['disk'] for i in nodes))
-
-    earliestTime = min(n['time'] for n in allFlows)
-    lastTime = max(n['time'] for n in allFlows)
-
-    memAddressRange = [n['addr'] for n in onlyMem]
-    diskAddressRange = [n['addr'] for n in onlyDisk]
-    lengths = [n['length'] for n in allFlows]
-
-    smallestMemAddress = min(memAddressRange)
-    largestMemAddress = max(memAddressRange)
-    memoryRange = largestMemAddress - smallestMemAddress
-
-    smallestDiskAddress = min(diskAddressRange)
-    largestDiskAddress = max(diskAddressRange)
-    diskRange = largestDiskAddress - smallestDiskAddress
-
-    print 'flows', np.mean(lengths), len(lengths)
-    print 'time', earliestTime, lastTime, lastTime - earliestTime
-    print 'mem', smallestMemAddress, largestMemAddress, memoryRange
-    print 'disk', smallestDiskAddress, largestDiskAddress, diskRange
-
-    return memoryRange, onlyMem, diskRange, onlyDisk, earliestTime
-
 def makeFlows(nodes):
-    memoryRange, onlyMem, diskRange, onlyDisk, earliestTime = getFlowInfo(nodes)
+    random.seed(0)
     hosts = random.sample(xrange(144), len(nodes))
 
-    def whichMem(addr):
-        return int(addr/(memoryRange/len(nodes))) % 10
-    def whichDisk(addr):
-        return int(addr/(diskRange/len(nodes))) % 10
+    def which(node, addrRange, addr):
+        ind = range(10)
+        random.shuffle(ind)
+        return ind[int(addr/(addrRange/len(nodes)))]
 
     flows = []
-    for mem in onlyMem:
-        if (mem['rw'] == 'r'):
-            src = hosts[whichMem(mem['addr'])]
-            dst = hosts[mem['node']]
-            typ = "memRead"
-        else:
-            src = hosts[mem['node']]
-            dst = hosts[whichMem(mem['addr'])]
-            typ = "memWr"
-        if (src == dst):
-            continue
-        flows.append({'time':mem['time'] - earliestTime, 'src':src, 'dst':dst, 'size':mem['length'], 'type':typ})
-    for disk in onlyDisk:
-        if (disk['rw'] == 'r'):
-            src = hosts[whichDisk(disk['addr'])]
-            dst = hosts[disk['node']]
-            typ = "diskRead"
-        else:
-            src = hosts[disk['node']]
-            dst = hosts[whichDisk(disk['addr'])]
-            typ = "diskWr"
-        if (src == dst):
-            continue
-        flows.append({'time':disk['time'] - earliestTime, 'src':src, 'dst':dst, 'size':disk['length'], 'type':typ})
+    for n in nodes:
+        mems = n['mem']
+        disks = n['disk']
+
+        memAddrs = [m['addr'] for m in mems]
+        memRange = max(memAddrs) - min(memAddrs)
+
+        diskAddrs = [d['addr'] for d in disks]
+        diskRange = max(diskAddrs) - min(diskAddrs)
+
+        for mem in mems:
+            if (mem['rw'] == 'r'):
+                src = hosts[which(n, memRange, mem['addr'])]
+                dst = hosts[n]
+                typ = "memRead"
+            else:
+                src = hosts[n]
+                dst = hosts[which(n, memRange, mem['addr'])]
+                typ = "memWr"
+            if (src == dst):
+                continue
+            flows.append({'time':mem['time'] - earliestTime, 'src':src, 'dst':dst, 'size':mem['length'], 'type':typ, 'addr':mem['addr']})
+        for disk in disks:
+            if (disk['rw'] == 'r'):
+                src = hosts[which(n, diskRange, disk['addr'])]
+                dst = hosts[n]
+                typ = "diskRead"
+            else:
+                src = hosts[n]
+                dst = hosts[which(n, diskRange, disk['addr'])]
+                typ = "diskWr"
+            if (src == dst):
+                continue
+            flows.append({'time':disk['time'] - earliestTime, 'src':src, 'dst':dst, 'size':disk['length'], 'type':typ, 'addr':disk['addr']})
     return flows
 
 # if two flows have the same source and destination and start within epsilon of each other, combine them.
 def collapseFlows(flows):
-    epsilon = 5e-6
     def combine(fs):
         first = next(fs)
         time = first['time']
         src = first['src']
         dst = first['dst']
         typ = first['type']
+        addr = first['addr']
         totalSize = first['size'] + sum(f['size'] for f in fs)
-        return {'time':time, 'src':src, 'dst':dst, 'type':typ, 'size':totalSize}
+        return {'time':time, 'src':src, 'dst':dst, 'type':typ, 'size':totalSize, 'addr': addr}
 
-    keyfunc = lambda f:",".join(map(str,(f['type'], f['src'], f['dst'], int(f['time']))))
-    flows.sort(key = keyfunc)
+    def grouper(fs):
+        flows = [fs[0]]
+        addr = fs[0]['addr']
+        typ = fs[0]['type']
+        for f in fs[1:]:
+            if (f['type'] != typ or f['addr'] != addr + 1):
+                yield flows
+                flows.clear()
+            else:
+                flows.append(f)
+
+    hosts = set(f['src'] for f in flows)
+    sdpairs = sum(([(i,j) for j in hosts if i != j] for i in hosts), [])
+    sdflows = {(s,d):[f for f in flows if f['src'] == s and f['dst'] == d] for s,d in sdpairs}
     collapsed = []
-    for k, g in itertools.groupby(flows, keyfunc):
-        collapsed.append(combine(g))
+    for sd in sdflows.keys():
+        fs = sdflows[sd]
+        fs.sort(key = lambda f:f['time'])
+        collapsed += map(combine, grouper(fs))
     collapsed.sort(key = lambda f:f['time'])
     return collapsed
 
@@ -181,7 +178,7 @@ if __name__ == '__main__':
     fid = 0
     with open('flows.txt', 'w') as of:
         for f in flows:
-            of.write("{0} {1} {2} {3} {4} {5}\n".format(fid, "%.9f" % f['time'], f['src'], f['dst'], f['size'], f['type']))
+            of.write("{0} {1} {2} {3} {4} {5} {6}\n".format(fid, "%.9f" % f['time'], f['src'], f['dst'], f['size'], f['type'], f['addr']))
             fid += 1
     print uncollapsed_len, fid
     print 'collapsed', uncollapsed_len - fid, 'flows'

@@ -48,7 +48,7 @@ def sdAnalysis(flows):
         fs = sdflows[sd]
         fs.sort(key = lambda f:f['time'])
         inter = interarrival(fs)
-        stats = (len(fs), np.median(inter), min(inter), max(inter)) if len(inter) > 0 else (0, 0,0,0,0)
+        stats = (len(fs), np.median(inter), min(inter), max(inter)) if len(inter) > 0 else (0,0,0,0)
         sdstats.append((sd, stats))
     sdstats.sort(key = lambda x:x[0][1])
     sdstats.sort(key = lambda x:x[0][0])
