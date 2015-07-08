@@ -76,7 +76,7 @@ if __name__ == '__main__':
     flows = readFlows(sys.argv[-1])
 
     sdAnalysis(flows)
-#    burstinessAnalysis(flows)
+    burstinessAnalysis(flows)
 
     #outputSimulatorFriendly('sim_'+sys.argv[1], flows)
 

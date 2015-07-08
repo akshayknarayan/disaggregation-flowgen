@@ -7,6 +7,8 @@ import random
 
 import numpy as np
 
+import pdb
+
 '''
 Read the output of /rmem/results/<blah>/<vm#-mem/disk-ec2id#-partialTrace>
 '''
@@ -94,18 +96,26 @@ def makeFlows(nodes):
     def which(node, addrRange, addr):
         ind = range(10)
         random.shuffle(ind)
-        return ind[int(addr/(addrRange/len(nodes)))]
+        return ind[min(int(addr/(addrRange/len(nodes))), 9)]
 
     flows = []
+
+    earliestTime = min(f['time'] for f in sum((n['mem'] + n['disk'] for n in nodes.values()), []))
+
     for n in nodes:
-        mems = n['mem']
-        disks = n['disk']
+        mems = nodes[n]['mem']
+        disks = nodes[n]['disk']
 
         memAddrs = [m['addr'] for m in mems]
         memRange = max(memAddrs) - min(memAddrs)
 
         diskAddrs = [d['addr'] for d in disks]
         diskRange = max(diskAddrs) - min(diskAddrs)
+
+        print n, memRange, diskRange
+
+        memFlows = []
+        diskFlows = []
 
         for mem in mems:
             if (mem['rw'] == 'r'):
@@ -118,7 +128,8 @@ def makeFlows(nodes):
                 typ = "memWr"
             if (src == dst):
                 continue
-            flows.append({'time':mem['time'] - earliestTime, 'src':src, 'dst':dst, 'size':mem['length'], 'type':typ, 'addr':mem['addr']})
+            memFlows.append({'time':mem['time'] - earliestTime, 'src':src, 'dst':dst, 'size':mem['length'], 'type':typ, 'disp-addr':str(n) + '-' + str(mem['addr']), 'addr': mem['addr']})
+
         for disk in disks:
             if (disk['rw'] == 'r'):
                 src = hosts[which(n, diskRange, disk['addr'])]
@@ -130,20 +141,22 @@ def makeFlows(nodes):
                 typ = "diskWr"
             if (src == dst):
                 continue
-            flows.append({'time':disk['time'] - earliestTime, 'src':src, 'dst':dst, 'size':disk['length'], 'type':typ, 'addr':disk['addr']})
+            diskFlows.append({'time':disk['time'] - earliestTime, 'src':src, 'dst':dst, 'size':disk['length'], 'type':typ, 'disp-addr':str(n) + '-' + str(disk['addr']), 'addr':disk['addr']})
+
+        flows += collapseFlows(memFlows) + collapseFlows(diskFlows)
     return flows
 
-# if two flows have the same source and destination and start within epsilon of each other, combine them.
 def collapseFlows(flows):
     def combine(fs):
-        first = next(fs)
+        first = fs[0]
         time = first['time']
         src = first['src']
         dst = first['dst']
         typ = first['type']
         addr = first['addr']
-        totalSize = first['size'] + sum(f['size'] for f in fs)
-        return {'time':time, 'src':src, 'dst':dst, 'type':typ, 'size':totalSize, 'addr': addr}
+        dispaddr = first['disp-addr']
+        totalSize = sum(f['size'] for f in fs)
+        return {'time':time, 'src':src, 'dst':dst, 'type':typ, 'size':totalSize, 'addr': addr, 'disp-addr': dispaddr}
 
     def grouper(fs):
         flows = [fs[0]]
@@ -152,9 +165,12 @@ def collapseFlows(flows):
         for f in fs[1:]:
             if (f['type'] != typ or f['addr'] != addr + 1):
                 yield flows
-                flows.clear()
+                flows = [f]
+                addr = f['addr']
+                typ = f['type']
             else:
                 flows.append(f)
+                addr += 1
 
     hosts = set(f['src'] for f in flows)
     sdpairs = sum(([(i,j) for j in hosts if i != j] for i in hosts), [])
@@ -163,7 +179,7 @@ def collapseFlows(flows):
     for sd in sdflows.keys():
         fs = sdflows[sd]
         fs.sort(key = lambda f:f['time'])
-        collapsed += map(combine, grouper(fs))
+        collapsed += map(combine, grouper(fs)) if len(fs) > 0 else []
     collapsed.sort(key = lambda f:f['time'])
     return collapsed
 
@@ -173,12 +189,9 @@ if __name__ == '__main__':
         sys.exit(1)
     nodes = readFiles(sys.argv[1:])
     flows = makeFlows(nodes)
-    uncollapsed_len = len(flows)
-    flows = collapseFlows(flows)
     fid = 0
     with open('flows.txt', 'w') as of:
         for f in flows:
-            of.write("{0} {1} {2} {3} {4} {5} {6}\n".format(fid, "%.9f" % f['time'], f['src'], f['dst'], f['size'], f['type'], f['addr']))
+            of.write("{0} {1} {2} {3} {4} {5} {6}\n".format(fid, "%.9f" % f['time'], f['src'], f['dst'], f['size'], f['type'], f['disp-addr']))
             fid += 1
-    print uncollapsed_len, fid
-    print 'collapsed', uncollapsed_len - fid, 'flows'
+
