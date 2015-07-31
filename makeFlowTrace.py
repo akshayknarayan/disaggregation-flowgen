@@ -94,9 +94,9 @@ def makeFlows(nodes):
     hosts = random.sample(xrange(144), len(nodes))
 
     def which(node, addrRange, addr):
-        ind = range(10)
+        ind = range(len(nodes))
         random.shuffle(ind)
-        return ind[min(int(addr/(addrRange/len(nodes))), 9)]
+        return ind[min(int(addr/(addrRange/len(nodes))), len(nodes)-1)]
 
     flows = []
 
@@ -143,7 +143,7 @@ def makeFlows(nodes):
                 continue
             diskFlows.append({'time':disk['time'] - earliestTime, 'src':src, 'dst':dst, 'size':disk['length'], 'type':typ, 'disp-addr':str(n) + '-' + str(disk['addr']), 'addr':disk['addr']})
 
-        flows += collapseFlows(memFlows) + collapseFlows(diskFlows)
+        flows += memFlows + diskFlows # collapseFlows(memFlows), collapseFlows(diskFlows)
     return flows
 
 def collapseFlows(flows):
