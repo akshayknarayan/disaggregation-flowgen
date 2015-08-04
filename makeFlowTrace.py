@@ -107,47 +107,46 @@ def makeFlows(nodes):
 
     for n in nodes:
         mems = nodes[n]['mem']
-        disks = nodes[n]['disk']
-
-        memAddrs = [m['addr'] for m in mems]
-        memRange = max(memAddrs) - min(memAddrs)
-
-        diskAddrs = [d['addr'] for d in disks]
-        diskRange = max(diskAddrs) - min(diskAddrs)
-
-        print n, memRange, diskRange
-
         memFlows = []
+        if (len(mems) > 0):
+            memAddrs = [m['addr'] for m in mems]
+            memRange = max(memAddrs) - min(memAddrs)
+
+            for mem in mems:
+                if (mem['rw'] == 'r'):
+                    src = hosts[which(n, memRange, mem['addr'])]
+                    dst = hosts[n]
+                    typ = "memRead"
+                else:
+                    src = hosts[n]
+                    dst = hosts[which(n, memRange, mem['addr'])]
+                    typ = "memWr"
+                if (src == dst):
+                    continue
+                memFlows.append({'time':mem['time'] - earliestTime, 'src':src, 'dst':dst, 'size':mem['length'], 'type':typ, 'disp-addr':str(n) + '-' + str(mem['addr']), 'addr': mem['addr']})
+            flows += memFlows
+
+        disks = nodes[n]['disk']
         diskFlows = []
+        if (len(disks) > 0):
+            diskAddrs = [d['addr'] for d in disks]
+            diskRange = max(diskAddrs) - min(diskAddrs)
 
-        for mem in mems:
-            if (mem['rw'] == 'r'):
-                src = hosts[which(n, memRange, mem['addr'])]
-                dst = hosts[n]
-                typ = "memRead"
-            else:
-                src = hosts[n]
-                dst = hosts[which(n, memRange, mem['addr'])]
-                typ = "memWr"
-            if (src == dst):
-                continue
-            memFlows.append({'time':mem['time'] - earliestTime, 'src':src, 'dst':dst, 'size':mem['length'], 'type':typ, 'disp-addr':str(n) + '-' + str(mem['addr']), 'addr': mem['addr']})
+            for disk in disks:
+                if (disk['rw'] == 'r'):
+                    src = hosts[which(n, diskRange, disk['addr'])]
+                    dst = hosts[n]
+                    typ = "diskRead"
+                else:
+                    src = hosts[n]
+                    dst = hosts[which(n, diskRange, disk['addr'])]
+                    typ = "diskWr"
+                if (src == dst):
+                    continue
+                diskFlows.append({'time':disk['time'] - earliestTime, 'src':src, 'dst':dst, 'size':disk['length'], 'type':typ, 'disp-addr':str(n) + '-' + str(disk['addr']), 'addr':disk['addr']})
+            flows += collapseFlows(diskFlows)
 
-        for disk in disks:
-            if (disk['rw'] == 'r'):
-                src = hosts[which(n, diskRange, disk['addr'])]
-                dst = hosts[n]
-                typ = "diskRead"
-            else:
-                src = hosts[n]
-                dst = hosts[which(n, diskRange, disk['addr'])]
-                typ = "diskWr"
-            if (src == dst):
-                continue
-            diskFlows.append({'time':disk['time'] - earliestTime, 'src':src, 'dst':dst, 'size':disk['length'], 'type':typ, 'disp-addr':str(n) + '-' + str(disk['addr']), 'addr':disk['addr']})
-
-        flows += memFlows + collapseFlows(diskFlows)
-
+        print n, len(flows)
     return flows
 
 # disk flows should be combined so that requests for sequential addresses are the same flow
@@ -192,12 +191,13 @@ def collapseFlows(flows):
 
 if __name__ == '__main__':
     if (len(sys.argv) < 2):
-        print 'Usage: python makeFlowTrace.py <spark IO traces...>'
+        print 'Usage: python makeFlowTrace.py <outfile> <IO traces...>'
         sys.exit(1)
-    nodes = readFiles(sys.argv[1:])
+    outfname = sys.argv[1]
+    nodes = readFiles(sys.argv[2:])
     flows = makeFlows(nodes)
     fid = 0
-    with open('flows.txt', 'w') as of:
+    with open(outfname, 'w') as of:
         for f in flows:
             of.write("{0} {1} {2} {3} {4} {5} {6}\n".format(fid, "%.9f" % f['time'], f['src'], f['dst'], f['size'], f['type'], f['disp-addr']))
             fid += 1

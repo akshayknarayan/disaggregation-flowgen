@@ -49,7 +49,7 @@ def burstinessAnalysis(flows):
     flowsByTime = [(k,list(f)) for k,f in itertools.groupby(flows, key = lambda i: i['time'] // slotDuration)]
     times, flowGroups = zip(*flowsByTime)
     byTime = map(lambda fs: sum(f['size'] for f in fs) * 8, flowGroups)
-    xaxis = np.array(times) / 1e3
+    xaxis = np.array(times) / 1e3 # time in seconds
     yaxis = np.array(byTime) * slotDuration
 
     #pdb.set_trace()
@@ -59,7 +59,6 @@ def burstinessAnalysis(flows):
     plt.ylabel('bps')
     plt.semilogy(xaxis, yaxis, 'b.')
     plt.savefig('trafficvolume.png')
-
 
 def interarrival(flows):
     return [flows[i+1]['time'] - flows[i]['time'] for i in range(len(flows)-1)]
@@ -132,9 +131,9 @@ if __name__ == '__main__':
 
     flows = readFlows(sys.argv[-1])
 
-#    flowSizes(flows)
+    flowSizes(flows)
 #    sdAnalysis(flows)
-#    sourceInterarrival(flows)
+    sourceInterarrival(flows)
     burstinessAnalysis(flows)
 
     #outputSimulatorFriendly('sim_'+sys.argv[1], flows)
