@@ -1,13 +1,14 @@
 #!/usr/bin/python
 
 import sys
-
-import pdb
+import itertools
 
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 from matplotlib import pyplot as plt
+
+import pdb
 
 def readFlows(filename):
     return [
@@ -41,20 +42,24 @@ def cdf(nums, method = 'full'):
         yaxis = np.cumsum(hist) * dx
         return xaxis[1:], yaxis
 
-def sliceByTime(flows):
+def burstinessAnalysis(flows):
     flows.sort(key = lambda x: x['time'])
-    duration = flows[-1]['time'] - flows[0]['time']
-    #say we have 1000 slices
-    slotDuration = duration / 1000
-    print slotDuration
-    flowsByTime = []
-    sliceStart = flows[0]['time']
-    while sliceStart < flows[-1]['time']:
-        cutoff = sliceStart + slotDuration
-        flowsAtTime = [f for f in flows if f['time'] >= sliceStart and f['time'] < cutoff]
-        flowsByTime.append(flowsAtTime)
-        sliceStart = cutoff
-    return flowsByTime
+    slotDuration = 1e3 # 1 ms = 1000 us slots
+
+    flowsByTime = [(k,list(f)) for k,f in itertools.groupby(flows, key = lambda i: i['time'] // slotDuration)]
+    times, flowGroups = zip(*flowsByTime)
+    byTime = map(lambda fs: sum(f['size'] for f in fs) * 8, flowGroups)
+    xaxis = np.array(times) / 1e3
+    yaxis = np.array(byTime) * slotDuration
+
+    #pdb.set_trace()
+
+    plt.title('Traffic Volume')
+    plt.xlabel('Time (s)')
+    plt.ylabel('bps')
+    plt.semilogy(xaxis, yaxis, 'b.')
+    plt.savefig('trafficvolume.png')
+
 
 def interarrival(flows):
     return [flows[i+1]['time'] - flows[i]['time'] for i in range(len(flows)-1)]
@@ -95,14 +100,6 @@ def sourceInterarrival(flows):
         plt.semilogx(x, y, label = str(s))
     plt.savefig('src_interarrivals.png')
 
-def burstinessAnalysis(flows):
-    byTime = sliceByTime(flows)
-    print 'number of flows by time'
-    print map(len, byTime)
-
-    print 'bandwidth by time'
-    print map(lambda fs: sum(f['size'] for f in fs) * 8, byTime)
-
 def flowSizes(flows):
     def plotSizeCDF(fs, name, fname, logx = False):
         x, y = cdf(fs)
@@ -120,11 +117,11 @@ def flowSizes(flows):
     allfs = [f['size'] for f in flows]
     plotSizeCDF(allfs, 'All Flows', 'allflowsizes', logx = True)
 
-#    mems = [f['size'] for f in flows if 'mem' in f['type']]
-#    plotSizeCDF(mems, 'Remote Memory Flows', 'memflowsizes')
-#
-#    disk = [f['size'] for f in flows if 'disk' in f['type']]
-#    plotSizeCDF(disk, 'Disk Flows', 'diskflowsizes')
+    mems = [f['size'] for f in flows if 'mem' in f['type']]
+    plotSizeCDF(mems, 'Remote Memory Flows', 'memflowsizes')
+
+    disk = [f['size'] for f in flows if 'disk' in f['type']]
+    plotSizeCDF(disk, 'Disk Flows', 'diskflowsizes')
 
 if __name__ == '__main__':
     if (len(sys.argv) < 2):
@@ -135,10 +132,10 @@ if __name__ == '__main__':
 
     flows = readFlows(sys.argv[-1])
 
-    flowSizes(flows)
+#    flowSizes(flows)
 #    sdAnalysis(flows)
 #    sourceInterarrival(flows)
-#    burstinessAnalysis(flows)
+    burstinessAnalysis(flows)
 
     #outputSimulatorFriendly('sim_'+sys.argv[1], flows)
 
