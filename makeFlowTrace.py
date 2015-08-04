@@ -93,6 +93,9 @@ def makeFlows(nodes):
     random.seed(0)
     hosts = random.sample(xrange(144), len(nodes))
 
+    print zip(range(10), hosts)
+
+    #this represents sequential address space assignment to nodes.
     def which(node, addrRange, addr):
         ind = range(len(nodes))
         random.shuffle(ind)
@@ -143,9 +146,11 @@ def makeFlows(nodes):
                 continue
             diskFlows.append({'time':disk['time'] - earliestTime, 'src':src, 'dst':dst, 'size':disk['length'], 'type':typ, 'disp-addr':str(n) + '-' + str(disk['addr']), 'addr':disk['addr']})
 
-        flows += memFlows + diskFlows # collapseFlows(memFlows), collapseFlows(diskFlows)
+        flows += memFlows + collapseFlows(diskFlows)
+
     return flows
 
+# disk flows should be combined so that requests for sequential addresses are the same flow
 def collapseFlows(flows):
     def combine(fs):
         first = fs[0]
@@ -171,15 +176,17 @@ def collapseFlows(flows):
             else:
                 flows.append(f)
                 addr += 1
+        yield flows
 
-    hosts = set(f['src'] for f in flows)
+    hosts = set(f['src'] for f in flows) | set(f['dst'] for f in flows)
     sdpairs = sum(([(i,j) for j in hosts if i != j] for i in hosts), [])
     sdflows = {(s,d):[f for f in flows if f['src'] == s and f['dst'] == d] for s,d in sdpairs}
     collapsed = []
     for sd in sdflows.keys():
         fs = sdflows[sd]
         fs.sort(key = lambda f:f['time'])
-        collapsed += map(combine, grouper(fs)) if len(fs) > 0 else []
+        if (len(fs) > 0):
+            collapsed += list(map(combine, grouper(fs)))
     collapsed.sort(key = lambda f:f['time'])
     return collapsed
 

@@ -2,7 +2,12 @@
 
 import sys
 
+import pdb
+
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')
+from matplotlib import pyplot as plt
 
 def readFlows(filename):
     return [
@@ -24,13 +29,28 @@ def outputSimulatorFriendly(fname, flows):
         for f in flows:
             out.write(template.format(f['id'], "%.9f" % (f['time']/1e6 + 1.0), int(np.ceil(f['size']/1460)), f['src'], f['dst']))
 
+def cdf(nums, method = 'full'):
+    if (method is 'full'):
+        N = len(nums)
+        xaxis = np.sort(nums)
+        yaxis = np.array(range(N))/float(N)
+        return xaxis, yaxis
+    else:
+        hist, xaxis = np.histogram(nums, normed = True)
+        dx = xaxis[1] - xaxis[0]
+        yaxis = np.cumsum(hist) * dx
+        return xaxis[1:], yaxis
+
 def sliceByTime(flows):
     flows.sort(key = lambda x: x['time'])
-    times = range(1,296)
+    duration = flows[-1]['time'] - flows[0]['time']
+    #say we have 1000 slices
+    slotDuration = duration / 1000
+    print slotDuration
     flowsByTime = []
-    sliceStart = 0
-    for time in times:
-        cutoff = time * 1e6
+    sliceStart = flows[0]['time']
+    while sliceStart < flows[-1]['time']:
+        cutoff = sliceStart + slotDuration
         flowsAtTime = [f for f in flows if f['time'] >= sliceStart and f['time'] < cutoff]
         flowsByTime.append(flowsAtTime)
         sliceStart = cutoff
@@ -40,7 +60,7 @@ def interarrival(flows):
     return [flows[i+1]['time'] - flows[i]['time'] for i in range(len(flows)-1)]
 
 def sdAnalysis(flows):
-    hosts = set(f['src'] for f in flows)
+    hosts = set(f['src'] for f in flows) | set(f['dst'] for f in flows)
     sdpairs = sum(([(i,j) for j in hosts if i != j] for i in hosts), [])
     sdflows = {(s,d):[f for f in flows if f['src'] == s and f['dst'] == d] for s,d in sdpairs}
     sdstats = []
@@ -56,15 +76,55 @@ def sdAnalysis(flows):
     for t in sdstats:
         print t[0], t[1]
 
-def burstinessAnalysis(flows):
-    lengths = [f['size'] for f in flows]
-    hist = np.histogram(lengths)
-    print 'Histogram'
-    print hist
+def sourceInterarrival(flows):
+    def interarrivals(times):
+        times = list(times)
+        times.sort()
+        old = times.pop(0)
+        while(len(times) > 0):
+            curr = times.pop(0)
+            yield curr - old
+            old = curr
 
+    srcs = set(f['src'] for f in flows)
+    plt.title('CDF of Interarrival Times')
+    plt.ylim(0,1)
+    for s in srcs:
+        inters = list(interarrivals([f['time'] for f in flows if f['src'] == s]))
+        x, y = cdf(inters)
+        plt.semilogx(x, y, label = str(s))
+    plt.savefig('src_interarrivals.png')
+
+def burstinessAnalysis(flows):
     byTime = sliceByTime(flows)
-    print 'by time'
+    print 'number of flows by time'
     print map(len, byTime)
+
+    print 'bandwidth by time'
+    print map(lambda fs: sum(f['size'] for f in fs) * 8, byTime)
+
+def flowSizes(flows):
+    def plotSizeCDF(fs, name, fname, logx = False):
+        x, y = cdf(fs)
+        plt.title(name)
+        plt.xlabel('Size, Bytes')
+        plt.ylabel('CDF')
+        plt.ylim(0,1)
+        if (logx):
+            plt.semilogx(x, y)
+        else:
+            plt.plot(x, y)
+        plt.savefig(fname + '_cdf.png')
+        plt.clf()
+
+    allfs = [f['size'] for f in flows]
+    plotSizeCDF(allfs, 'All Flows', 'allflowsizes', logx = True)
+
+#    mems = [f['size'] for f in flows if 'mem' in f['type']]
+#    plotSizeCDF(mems, 'Remote Memory Flows', 'memflowsizes')
+#
+#    disk = [f['size'] for f in flows if 'disk' in f['type']]
+#    plotSizeCDF(disk, 'Disk Flows', 'diskflowsizes')
 
 if __name__ == '__main__':
     if (len(sys.argv) < 2):
@@ -75,8 +135,10 @@ if __name__ == '__main__':
 
     flows = readFlows(sys.argv[-1])
 
-    sdAnalysis(flows)
-    burstinessAnalysis(flows)
+    flowSizes(flows)
+#    sdAnalysis(flows)
+#    sourceInterarrival(flows)
+#    burstinessAnalysis(flows)
 
     #outputSimulatorFriendly('sim_'+sys.argv[1], flows)
 
