@@ -54,6 +54,7 @@ def burstinessAnalysis(flows):
 
     #pdb.set_trace()
 
+    plt.clf()
     plt.title('Traffic Volume')
     plt.xlabel('Time (s)')
     plt.ylabel('bps')
