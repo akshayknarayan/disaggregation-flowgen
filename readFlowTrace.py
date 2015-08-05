@@ -100,8 +100,8 @@ def sourceInterarrival(flows):
         x, y = cdf(inters)
         plt.semilogx(x, y, label = str(s))
         cmp_x = np.logspace(-1, 5)
-        plt.semilogx(cmp_x, scipy.stats.expon.cdf(cmp_x, scale = np.mean(x)), '--', label = 'Fitted Exponential')
-        print 'K-S Test', scipy.stats.kstest(x, lambda x: scipy.stats.expon.cdf(x, scale = np.mean(x)))
+        plt.semilogx(cmp_x, scipy.stats.expon.cdf(cmp_x, scale = 10), '--', label = 'Fitted Exponential')
+        print 'K-S Test', scipy.stats.kstest(x, lambda x: scipy.stats.expon.cdf(x, scale = 10))
     plt.savefig('comparefit_cdf_src_interarrivals.png')
 
     plt.clf()
