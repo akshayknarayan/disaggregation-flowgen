@@ -4,6 +4,7 @@ import sys
 import itertools
 
 import numpy as np
+import scipy.stats
 import matplotlib
 matplotlib.use('Agg')
 from matplotlib import pyplot as plt
@@ -61,10 +62,10 @@ def burstinessAnalysis(flows):
     plt.semilogy(xaxis, yaxis, 'b.')
     plt.savefig('trafficvolume.png')
 
-def interarrival(flows):
-    return [flows[i+1]['time'] - flows[i]['time'] for i in range(len(flows)-1)]
-
 def sdAnalysis(flows):
+    def interarrival(flows):
+        return [flows[i+1]['time'] - flows[i]['time'] for i in range(len(flows)-1)]
+
     hosts = set(f['src'] for f in flows) | set(f['dst'] for f in flows)
     sdpairs = sum(([(i,j) for j in hosts if i != j] for i in hosts), [])
     sdflows = {(s,d):[f for f in flows if f['src'] == s and f['dst'] == d] for s,d in sdpairs}
@@ -83,7 +84,6 @@ def sdAnalysis(flows):
 
 def sourceInterarrival(flows):
     def interarrivals(times):
-#        pdb.set_trace()
         old = next(times)
         for curr in times:
             yield curr - old
@@ -92,12 +92,30 @@ def sourceInterarrival(flows):
     flows.sort(key = lambda f:f['time'])
     srcs = set(f['src'] for f in flows)
     plt.title('CDF of Interarrival Times')
+    plt.xlabel('Interarrival Time (us)')
+    plt.ylabel('CDF')
     plt.ylim(0,1)
     for s in srcs:
         inters = list(interarrivals(f['time'] for f in flows if f['src'] == s))
         x, y = cdf(inters)
         plt.semilogx(x, y, label = str(s))
-    plt.savefig('src_interarrivals.png')
+        cmp_x = np.logspace(-1, 5)
+        plt.semilogx(cmp_x, scipy.stats.expon.cdf(cmp_x, scale = np.mean(x)), '--', label = 'Fitted Exponential')
+        print 'K-S Test', scipy.stats.kstest(x, lambda x: scipy.stats.expon.cdf(x, scale = np.mean(x)))
+    plt.savefig('comparefit_cdf_src_interarrivals.png')
+
+    plt.clf()
+    plt.cla()
+    plt.title('Histogram of Interarrival Times')
+    plt.xlabel('Interarrival Time (us)')
+    plt.ylabel('Count')
+    for s in srcs:
+        inters = list(interarrivals(f['time'] for f in flows if f['src'] == s))
+        bin_vals, bin_edges, _ = plt.hist(inters, bins = np.logspace(-1, 6), log = True)
+        plt.xscale('log')
+        plt.xlim(0.1, 1e7)
+        break
+    plt.savefig('pdf_src_interarrivals.png')
 
 def flowSizes(flows):
     def plotSizeCDF(fs, name, fname, logx = False):
@@ -130,6 +148,8 @@ if __name__ == '__main__':
         mode = sys.argv[1]
 
     flows = readFlows(sys.argv[-1])
+
+    print 'read', len(flows), 'flows'
 
     flowSizes(flows)
 #    sdAnalysis(flows)

@@ -15,7 +15,8 @@ All Flows
 
 Interarrivals
 =============
-![Interarrival CDF Per Source](./src_interarrivals.png)
+![Interarrival CDF Per Source](./comparefit_cdf_src_interarrivals.png)
+![PDF of Interarrival Times](./pdf_src_interarrivals.png)
 
 Traffic Volume
 ==============
