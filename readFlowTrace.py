@@ -83,19 +83,18 @@ def sdAnalysis(flows):
 
 def sourceInterarrival(flows):
     def interarrivals(times):
-        times = list(times)
-        times.sort()
-        old = times.pop(0)
-        while(len(times) > 0):
-            curr = times.pop(0)
+#        pdb.set_trace()
+        old = next(times)
+        for curr in times:
             yield curr - old
             old = curr
 
+    flows.sort(key = lambda f:f['time'])
     srcs = set(f['src'] for f in flows)
     plt.title('CDF of Interarrival Times')
     plt.ylim(0,1)
     for s in srcs:
-        inters = list(interarrivals([f['time'] for f in flows if f['src'] == s]))
+        inters = list(interarrivals(f['time'] for f in flows if f['src'] == s))
         x, y = cdf(inters)
         plt.semilogx(x, y, label = str(s))
     plt.savefig('src_interarrivals.png')
