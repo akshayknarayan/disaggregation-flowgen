@@ -33,7 +33,8 @@ Uncombined                                                            | Combined
 Traffic Volume
 ==============
 
-Uncombined                                                            | Combined                                                                       |Delta = 1000
-----------------------------------------------------------------------|--------------------------------------------------------------------------------|----------------------------------------------------------
-![Traffic Volume in 1ms measurement increments](./trafficvolume.png)  | ![Traffic Volume in 1ms measurement increments](./combined_trafficvolume.png)|![Traffic Volume in 1ms measurement increments](./combined_trafficvolume.png)
+Uncombined                                          | Combined                                                      |Delta = 1000
+----------------------------------------------------|---------------------------------------------------------------|----------------------------------------------------------
+![Traffic Volume in 1ms measurement increments](./trafficvolume.png)      | ![Traffic Volume in 1ms measurement increments](./combined_trafficvolume.png)|![Traffic Volume in 1ms measurement increments](./delta1000_trafficvolume.png)
+![Traffic Volume in 1ms measurement increments](./cdf_trafficvolume.png)  | ![Traffic Volume in 1ms measurement increments](./combined_cdf_trafficvolume.png)|![Traffic Volume in 1ms measurement increments](./delta1000_cdf_trafficvolume.png)
 
