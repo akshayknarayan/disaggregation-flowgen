@@ -107,8 +107,8 @@ def sourceInterarrival(flows, prefix = None):
         x, y = cdf(inters)
         plt.semilogx(x, y, label = str(s))
         cmp_x = np.logspace(-1, 5)
-        plt.semilogx(cmp_x, scipy.stats.expon.cdf(cmp_x, scale = 10), '--', label = 'Fitted Exponential')
-        print 'K-S Test', scipy.stats.kstest(x, lambda x: scipy.stats.expon.cdf(x, scale = 10))
+        plt.semilogx(cmp_x, scipy.stats.expon.cdf(cmp_x, scale = np.mean(x)), '--', label = 'Fitted Exponential')
+        print 'K-S Test', scipy.stats.kstest(x, lambda x: scipy.stats.expon.cdf(x, scale = np.mean(x)))
     plt.savefig(prefixName(prefix, 'comparefit_cdf_src_interarrivals.png'))
 
     plt.clf()
@@ -126,7 +126,7 @@ def sourceInterarrival(flows, prefix = None):
 
 def burstinessAnalysis(flows, prefix = None):
     flows.sort(key = lambda x: x['time'])
-    slotDuration = 1e3 # 1 ms = 1000 us slots
+    slotDuration = 1e5 # 100 ms = 1e5 us slots
 
     flowsByTime = [(k,list(f)) for k,f in itertools.groupby(flows, key = lambda i: i['time'] // slotDuration)]
     times, flowGroups = zip(*flowsByTime)
@@ -142,6 +142,15 @@ def burstinessAnalysis(flows, prefix = None):
     plt.ylabel('bps')
     plt.semilogy(xaxis, yaxis, 'b.')
     plt.savefig(prefixName(prefix, 'trafficvolume.png'))
+
+    plt.clf()
+    plt.title('CDF of Traffic Volume')
+    plt.xlabel('Traffic Volume, bps')
+    plt.ylabel('CDF')
+    plt.ylim(0,1)
+    x, y = cdf(yaxis)
+    plt.semilogx(x, y)
+    plt.savefig(prefixName(prefix, 'cdf_trafficvolume.png'))
 
 def KStesting(flows):
     flows.sort(key = lambda f:f['time'])
@@ -193,10 +202,10 @@ if __name__ == '__main__':
 
     print 'read', len(flows), 'flows'
 
-    flowSizes(flows, prefix = mode)
+#    flowSizes(flows, prefix = mode)
 #    sdAnalysis(flows)
     sourceInterarrival(flows, prefix = mode)
-    burstinessAnalysis(flows, prefix = mode)
+#    burstinessAnalysis(flows, prefix = mode)
 
     #outputSimulatorFriendly('sim_'+sys.argv[1], flows)
 

@@ -181,9 +181,9 @@ def collapseFlows(flows):
                 grp = groups[found]
                 del groups[found]
                 grp.append(f)
-                groups[(f['addr'] + f['size'] / 4096, f['time'] + 10)] = grp
+                groups[(f['addr'] + f['size'] / 4096, f['time'] + 1000)] = grp
             else:
-                groups[(f['addr'] + f['size'] / 4096, f['time'] + 10)] = [f]
+                groups[(f['addr'] + f['size'] / 4096, f['time'] + 1000)] = [f]
         #yield remaining groups
         for grp in groups.values():
             yield grp
