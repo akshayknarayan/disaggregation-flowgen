@@ -124,6 +124,12 @@ def sourceInterarrival(flows, prefix = None):
         break
     plt.savefig(prefixName(prefix, 'pdf_src_interarrivals.png'))
 
+def normalizedDerivative(nums):
+    old = next(nums)
+    for curr in nums:
+        yield (curr - old)/old
+        old = curr
+
 def burstinessAnalysis(flows, prefix = None):
     flows.sort(key = lambda x: x['time'])
     slotDuration = 1e5 # 100 ms = 1e5 us slots
@@ -155,10 +161,9 @@ def burstinessAnalysis(flows, prefix = None):
     plt.clf()
     plt.title('Derivative of Traffic Volume')
     plt.xlabel('Time (s)')
-    plt.ylabel('bps^2')
-    tmp = list(interarrivals(iter(yaxis)))
-    print len(xaxis), len(yaxis), len(tmp)
-    plt.semilogy(xaxis[:-1], tmp)
+    plt.ylabel('bp(s^2)')
+    tmp = list(normalizedDerivative(iter(yaxis)))
+    plt.plot(xaxis[:-1], tmp)
     plt.savefig(prefixName(prefix, 'derivative_trafficvolume.png'))
 
 def KStesting(flows):
