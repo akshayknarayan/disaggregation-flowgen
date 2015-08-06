@@ -43,24 +43,31 @@ def cdf(nums, method = 'full'):
         yaxis = np.cumsum(hist) * dx
         return xaxis[1:], yaxis
 
-def burstinessAnalysis(flows):
-    flows.sort(key = lambda x: x['time'])
-    slotDuration = 1e3 # 1 ms = 1000 us slots
+def prefixName(pref, name):
+    return name if pref is None else pref + name
 
-    flowsByTime = [(k,list(f)) for k,f in itertools.groupby(flows, key = lambda i: i['time'] // slotDuration)]
-    times, flowGroups = zip(*flowsByTime)
-    byTime = map(lambda fs: sum(f['size'] for f in fs) * 8, flowGroups)
-    xaxis = np.array(times) / 1e3 # time in seconds
-    yaxis = np.array(byTime) * slotDuration
+def flowSizes(flows, prefix = None):
+    def plotSizeCDF(fs, name, fname, logx = False):
+        x, y = cdf(fs)
+        plt.title(name)
+        plt.xlabel('Size, Bytes')
+        plt.ylabel('CDF')
+        plt.ylim(0,1)
+        if (logx):
+            plt.semilogx(x, y)
+        else:
+            plt.plot(x, y)
+        plt.savefig(prefixName(prefix, fname + '_cdf.png'))
+        plt.clf()
 
-    #pdb.set_trace()
+    allfs = [f['size'] for f in flows]
+    plotSizeCDF(allfs, 'All Flows', 'allflowsizes', logx = True)
 
-    plt.clf()
-    plt.title('Traffic Volume')
-    plt.xlabel('Time (s)')
-    plt.ylabel('bps')
-    plt.semilogy(xaxis, yaxis, 'b.')
-    plt.savefig('trafficvolume.png')
+    mems = [f['size'] for f in flows if 'mem' in f['type']]
+    plotSizeCDF(mems, 'Remote Memory Flows', 'memflowsizes')
+
+    disk = [f['size'] for f in flows if 'disk' in f['type']]
+    plotSizeCDF(disk, 'Disk Flows', 'diskflowsizes')
 
 def sdAnalysis(flows):
     def interarrival(flows):
@@ -82,13 +89,13 @@ def sdAnalysis(flows):
     for t in sdstats:
         print t[0], t[1]
 
-def sourceInterarrival(flows):
-    def interarrivals(times):
-        old = next(times)
-        for curr in times:
-            yield curr - old
-            old = curr
+def interarrivals(times):
+    old = next(times)
+    for curr in times:
+        yield curr - old
+        old = curr
 
+def sourceInterarrival(flows, prefix = None):
     flows.sort(key = lambda f:f['time'])
     srcs = set(f['src'] for f in flows)
     plt.title('CDF of Interarrival Times')
@@ -102,7 +109,7 @@ def sourceInterarrival(flows):
         cmp_x = np.logspace(-1, 5)
         plt.semilogx(cmp_x, scipy.stats.expon.cdf(cmp_x, scale = 10), '--', label = 'Fitted Exponential')
         print 'K-S Test', scipy.stats.kstest(x, lambda x: scipy.stats.expon.cdf(x, scale = 10))
-    plt.savefig('comparefit_cdf_src_interarrivals.png')
+    plt.savefig(prefixName(prefix, 'comparefit_cdf_src_interarrivals.png'))
 
     plt.clf()
     plt.cla()
@@ -115,32 +122,67 @@ def sourceInterarrival(flows):
         plt.xscale('log')
         plt.xlim(0.1, 1e7)
         break
-    plt.savefig('pdf_src_interarrivals.png')
+    plt.savefig(prefixName(prefix, 'pdf_src_interarrivals.png'))
 
-def flowSizes(flows):
-    def plotSizeCDF(fs, name, fname, logx = False):
-        x, y = cdf(fs)
-        plt.title(name)
-        plt.xlabel('Size, Bytes')
-        plt.ylabel('CDF')
-        plt.ylim(0,1)
-        if (logx):
-            plt.semilogx(x, y)
-        else:
-            plt.plot(x, y)
-        plt.savefig(fname + '_cdf.png')
-        plt.clf()
+def burstinessAnalysis(flows, prefix = None):
+    flows.sort(key = lambda x: x['time'])
+    slotDuration = 1e3 # 1 ms = 1000 us slots
 
-    allfs = [f['size'] for f in flows]
-    plotSizeCDF(allfs, 'All Flows', 'allflowsizes', logx = True)
+    flowsByTime = [(k,list(f)) for k,f in itertools.groupby(flows, key = lambda i: i['time'] // slotDuration)]
+    times, flowGroups = zip(*flowsByTime)
+    byTime = map(lambda fs: sum(f['size'] for f in fs) * 8, flowGroups)
+    xaxis = np.array(times) / 1e3 # time in seconds
+    yaxis = np.array(byTime) * slotDuration
 
-    mems = [f['size'] for f in flows if 'mem' in f['type']]
-    plotSizeCDF(mems, 'Remote Memory Flows', 'memflowsizes')
+    #pdb.set_trace()
 
-    disk = [f['size'] for f in flows if 'disk' in f['type']]
-    plotSizeCDF(disk, 'Disk Flows', 'diskflowsizes')
+    plt.clf()
+    plt.title('Traffic Volume')
+    plt.xlabel('Time (s)')
+    plt.ylabel('bps')
+    plt.semilogy(xaxis, yaxis, 'b.')
+    plt.savefig(prefixName(prefix, 'trafficvolume.png'))
+
+def KStesting(flows):
+    flows.sort(key = lambda f:f['time'])
+    srcs = set(f['src'] for f in flows)
+    for s in srcs:
+        inters = list(interarrivals(f['time'] for f in flows if f['src'] == s))
+
+        #try to find the exponential with the lowest ks D-value
+        #start at 10
+        def search(lambda_cand, tries, prevRight = None, prevLeft = None, curr_ks = None):
+            if (tries > 998):
+                return None
+            if (curr_ks is None):
+                curr_ks = scipy.stats.kstest(inters, lambda x: scipy.stats.expon.cdf(x, scale = lambda_cand))
+            left_try = lambda_cand - 1 if lambda_cand > 2 else lambda_cand / 2
+            right_try = lambda_cand + 1 if lambda_cand > 1 else lambda_cand * 2
+            left_ks = scipy.stats.kstest(inters, lambda x: scipy.stats.expon.cdf(x, scale = left_try)) if prevLeft is None else prevLeft
+            right_ks = scipy.stats.kstest(inters, lambda x: scipy.stats.expon.cdf(x, scale = right_try)) if prevRight is None else prevRight
+            if (left_ks is None or right_ks is None):
+                return lambda_cand, curr_ks
+            elif (left_ks < curr_ks and right_ks > curr_ks):
+                # go left
+                return search(left_try, tries+1, prevRight = curr_ks, curr_ks = left_ks)
+            elif (left_ks > curr_ks and right_ks < curr_ks):
+                # go right
+                return search(right_try, tries+1, prevLeft = curr_ks, curr_ks = right_ks)
+            elif (left_ks > curr_ks and right_ks > curr_ks):
+                return lambda_cand, curr_ks
+            else:
+                # go in both directions
+                l1, explore_left = search(left_try, tries+1, prevRight = curr_ks, curr_ks = left_ks)
+                l2, explore_right = search(right_try, tries+1, prevLeft = curr_ks, curr_ks = right_ks)
+                if (explore_right < explore_left):
+                    return l2, explore_right
+                else:
+                    return l1, explore_left
+
+
 
 if __name__ == '__main__':
+    mode = None
     if (len(sys.argv) < 2):
         print 'Usage: python readFlowTrace.py <flows.txt>'
         sys.exit(1)
@@ -151,10 +193,10 @@ if __name__ == '__main__':
 
     print 'read', len(flows), 'flows'
 
-    flowSizes(flows)
+    flowSizes(flows, prefix = mode)
 #    sdAnalysis(flows)
-    sourceInterarrival(flows)
-    burstinessAnalysis(flows)
+    sourceInterarrival(flows, prefix = mode)
+    burstinessAnalysis(flows, prefix = mode)
 
     #outputSimulatorFriendly('sim_'+sys.argv[1], flows)
 

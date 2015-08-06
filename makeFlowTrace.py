@@ -124,7 +124,7 @@ def makeFlows(nodes):
                 if (src == dst):
                     continue
                 memFlows.append({'time':mem['time'] - earliestTime, 'src':src, 'dst':dst, 'size':mem['length'], 'type':typ, 'disp-addr':str(n) + '-' + str(mem['addr']), 'addr': mem['addr']})
-            flows += memFlows
+            flows += collapseFlows(memFlows)
 
         disks = nodes[n]['disk']
         diskFlows = []
@@ -162,20 +162,31 @@ def collapseFlows(flows):
         totalSize = sum(f['size'] for f in fs)
         return {'time':time, 'src':src, 'dst':dst, 'type':typ, 'size':totalSize, 'addr': addr, 'disp-addr': dispaddr}
 
+    # fs are flows with same src and dest
+    # should group sets of flows that are consecutive and separated by no more than delta = 10 us
     def grouper(fs):
-        flows = [fs[0]]
-        addr = fs[0]['addr']
-        typ = fs[0]['type']
-        for f in fs[1:]:
-            if (f['type'] != typ or f['addr'] != addr + 1):
-                yield flows
-                flows = [f]
-                addr = f['addr']
-                typ = f['type']
+        #dictionary of flow groups. key = (next expected address, time horizon), value = flows in group so far
+        groups = {}
+        for f in fs:
+            found = None
+            for addr, horizon in groups.keys():
+                if (f['addr'] == addr and f['time'] <= horizon):
+                    found = (addr, horizon)
+                    break
+                elif (f['time'] > horizon):
+                    #because flows are sorted by time, if we pass the horizon we yield the group.
+                    yield groups[(addr, horizon)]
+                    del groups[(addr, horizon)]
+            if (found is not None):
+                grp = groups[found]
+                del groups[found]
+                grp.append(f)
+                groups[(f['addr'] + f['size'] / 4096, f['time'] + 10)] = grp
             else:
-                flows.append(f)
-                addr += 1
-        yield flows
+                groups[(f['addr'] + f['size'] / 4096, f['time'] + 10)] = [f]
+        #yield remaining groups
+        for grp in groups.values():
+            yield grp
 
     hosts = set(f['src'] for f in flows) | set(f['dst'] for f in flows)
     sdpairs = sum(([(i,j) for j in hosts if i != j] for i in hosts), [])
