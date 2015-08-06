@@ -141,7 +141,7 @@ def burstinessAnalysis(flows, prefix = None):
     plt.xlabel('Time (s)')
     plt.ylabel('bps')
     plt.semilogy(xaxis, yaxis, 'b.')
-    plt.savefig(prefixName(prefix, 'trafficvolume.png'))
+    #plt.savefig(prefixName(prefix, 'trafficvolume.png'))
 
     plt.clf()
     plt.title('CDF of Traffic Volume')
@@ -150,7 +150,16 @@ def burstinessAnalysis(flows, prefix = None):
     plt.ylim(0,1)
     x, y = cdf(yaxis)
     plt.semilogx(x, y)
-    plt.savefig(prefixName(prefix, 'cdf_trafficvolume.png'))
+    #plt.savefig(prefixName(prefix, 'cdf_trafficvolume.png'))
+
+    plt.clf()
+    plt.title('Derivative of Traffic Volume')
+    plt.xlabel('Time (s)')
+    plt.ylabel('bps^2')
+    tmp = list(interarrivals(iter(yaxis)))
+    print len(xaxis), len(yaxis), len(tmp)
+    plt.semilogy(xaxis[:-1], tmp)
+    plt.savefig(prefixName(prefix, 'derivative_trafficvolume.png'))
 
 def KStesting(flows):
     flows.sort(key = lambda f:f['time'])
