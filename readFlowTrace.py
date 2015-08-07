@@ -127,7 +127,7 @@ def sourceInterarrival(flows, prefix = None):
 def normalizedDerivative(nums):
     old = next(nums)
     for curr in nums:
-        yield (curr - old)/old
+        yield (abs(curr - old))/old
         old = curr
 
 def burstinessAnalysis(flows, prefix = None):
@@ -147,7 +147,7 @@ def burstinessAnalysis(flows, prefix = None):
     plt.xlabel('Time (s)')
     plt.ylabel('bps')
     plt.semilogy(xaxis, yaxis, 'b.')
-    #plt.savefig(prefixName(prefix, 'trafficvolume.png'))
+    plt.savefig(prefixName(prefix, 'trafficvolume.png'))
 
     plt.clf()
     plt.title('CDF of Traffic Volume')
@@ -156,53 +156,15 @@ def burstinessAnalysis(flows, prefix = None):
     plt.ylim(0,1)
     x, y = cdf(yaxis)
     plt.semilogx(x, y)
-    #plt.savefig(prefixName(prefix, 'cdf_trafficvolume.png'))
+    plt.savefig(prefixName(prefix, 'cdf_trafficvolume.png'))
 
     plt.clf()
     plt.title('Derivative of Traffic Volume')
     plt.xlabel('Time (s)')
     plt.ylabel('bp(s^2)')
     tmp = list(normalizedDerivative(iter(yaxis)))
-    plt.plot(xaxis[:-1], tmp)
+    plt.semilogy(xaxis[:-1], tmp)
     plt.savefig(prefixName(prefix, 'derivative_trafficvolume.png'))
-
-def KStesting(flows):
-    flows.sort(key = lambda f:f['time'])
-    srcs = set(f['src'] for f in flows)
-    for s in srcs:
-        inters = list(interarrivals(f['time'] for f in flows if f['src'] == s))
-
-        #try to find the exponential with the lowest ks D-value
-        #start at 10
-        def search(lambda_cand, tries, prevRight = None, prevLeft = None, curr_ks = None):
-            if (tries > 998):
-                return None
-            if (curr_ks is None):
-                curr_ks = scipy.stats.kstest(inters, lambda x: scipy.stats.expon.cdf(x, scale = lambda_cand))
-            left_try = lambda_cand - 1 if lambda_cand > 2 else lambda_cand / 2
-            right_try = lambda_cand + 1 if lambda_cand > 1 else lambda_cand * 2
-            left_ks = scipy.stats.kstest(inters, lambda x: scipy.stats.expon.cdf(x, scale = left_try)) if prevLeft is None else prevLeft
-            right_ks = scipy.stats.kstest(inters, lambda x: scipy.stats.expon.cdf(x, scale = right_try)) if prevRight is None else prevRight
-            if (left_ks is None or right_ks is None):
-                return lambda_cand, curr_ks
-            elif (left_ks < curr_ks and right_ks > curr_ks):
-                # go left
-                return search(left_try, tries+1, prevRight = curr_ks, curr_ks = left_ks)
-            elif (left_ks > curr_ks and right_ks < curr_ks):
-                # go right
-                return search(right_try, tries+1, prevLeft = curr_ks, curr_ks = right_ks)
-            elif (left_ks > curr_ks and right_ks > curr_ks):
-                return lambda_cand, curr_ks
-            else:
-                # go in both directions
-                l1, explore_left = search(left_try, tries+1, prevRight = curr_ks, curr_ks = left_ks)
-                l2, explore_right = search(right_try, tries+1, prevLeft = curr_ks, curr_ks = right_ks)
-                if (explore_right < explore_left):
-                    return l2, explore_right
-                else:
-                    return l1, explore_left
-
-
 
 if __name__ == '__main__':
     mode = None
