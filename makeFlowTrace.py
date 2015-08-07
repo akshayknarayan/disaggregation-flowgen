@@ -12,7 +12,6 @@ import pdb
 '''
 Read the output of /rmem/results/<blah>/<vm#-mem/disk-ec2id#-partialTrace>
 '''
-
 def readMemoryLine(line, node):
     '''
     <record id> <utc timestamp> <page location> <length in pages> <page size = 4 KB>
@@ -77,6 +76,8 @@ def readFiles(fileNames):
                 fns[node]['disk'] = name
         elif '-meta-' in fname:
             fns[node]['ts'] = name
+        elif '-nic-' in fname:
+            continue #nic trace should be separate.
         else:
             assert(False)
 
