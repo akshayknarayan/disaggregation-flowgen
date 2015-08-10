@@ -41,7 +41,7 @@ def makeFlows(nodes):
     earliestTime = min(f['time'] for f in sum(nodes.values(), []))
     return sum((
         [{
-        'time':f['time'] - earliestTime,
+        'time':1e6*(f['time'] - earliestTime),
         'src':hosts[int(mapping[f['src']])],
         'dst':hosts[int(mapping[f['dst']])],
         'size':f['size']

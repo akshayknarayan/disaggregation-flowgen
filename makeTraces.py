@@ -5,6 +5,7 @@ import subprocess
 
 traces = ['wordcount', 'graphlab', 'terasort', 'memcached']
 template = 'bash -c "python makeFlowTrace.py results/{0}/{1}flows.txt traces/{0}/*"'
+nic_template = 'bash -c "python makeNicTrace.py results/{0}/{1}flows.txt traces/{0}_with_nic/*"'
 
 flavor = ''
 if (len(sys.argv) > 1):

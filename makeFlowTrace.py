@@ -189,6 +189,29 @@ def collapseFlows(flows):
         for grp in groups.values():
             yield grp
 
+    def grouper_timeOnly(fs):
+        groups = {}
+        for f in fs:
+            found = None
+            for horizon in groups.keys():
+                if (f['time'] <= horizon):
+                    found = horizon
+                    break
+                else:
+                    yield groups[horizon]
+                    del groups[horizon]
+            if (found is not None):
+                grp = groups[found]
+                del groups[found]
+                grp.append(f)
+                groups[f['time'] + 10] = grp
+            else:
+                groups[f['time'] + 10] = [f]
+        #yield remaining groups
+        for grp in groups.values():
+            yield grp
+
+
     hosts = set(f['src'] for f in flows) | set(f['dst'] for f in flows)
     sdpairs = sum(([(i,j) for j in hosts if i != j] for i in hosts), [])
     sdflows = {(s,d):[f for f in flows if f['src'] == s and f['dst'] == d] for s,d in sdpairs}
@@ -197,7 +220,7 @@ def collapseFlows(flows):
         fs = sdflows[sd]
         fs.sort(key = lambda f:f['time'])
         if (len(fs) > 0):
-            collapsed += list(map(combine, grouper(fs)))
+            collapsed += list(map(combine, grouper_timeOnly(fs)))
     collapsed.sort(key = lambda f:f['time'])
     return collapsed
 
