@@ -7,6 +7,7 @@ for dir in `ls`; do
     #python ../../readFlowTrace.py delta1000_ delta1000_flows.txt
     #python ../../readFlowTrace.py combined_ combined_flows.txt
     #python ../../readFlowTrace.py flows.txt
-    python ../../readFlowTrace.py timeOnly_ timeOnly_flows.txt
+    #python ../../readFlowTrace.py timeOnly_ timeOnly_flows.txt
+    python ../../readFlowTrace.py nic_ nic_flows.txt
     cd ..
 done

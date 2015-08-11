@@ -16,8 +16,8 @@ def readFlows(filename):
             {
                 'id':int(sp[0]),
                 'time':float(sp[1]),
-                'src':int(sp[2]),
-                'dst':int(sp[3]),
+                'src':sp[2],
+                'dst':sp[3],
                 'size':float(sp[4]),
                 'type':sp[5]
             } for sp
