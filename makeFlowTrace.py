@@ -5,16 +5,18 @@ import subprocess
 import itertools
 import random
 
-import numpy as np
+# import numpy as np
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 
-import pdb
+# import pdb
 
-'''
-Read the output of /rmem/results/<blah>/<vm#-mem/disk-ec2id#-partialTrace>
-'''
+
 def readMemoryLine(line, node):
     '''
-    <record id> <utc timestamp> <page location> <length in pages> <page size = 4 KB>
+    Read the output of /rmem/results/<blah>/<vm#-mem/disk-ec2id#-partialTrace>
+    <record id> <utc timestamp> <page location> <length, pages> <pg size= 4 KB>
     '''
     rid, timestamp, addr, length, pgSize = line.split()
     assert(int(pgSize) == 4096)
@@ -26,9 +28,17 @@ def readMemoryLine(line, node):
         timestamp = int(timestamp)
 
     rid = int(rid)
-    addr = int(addr)
-    length = int(length) * int(pgSize) # get in bytes
-    return { 'rid' : rid, 'time' : timestamp, 'node' : node, 'rw' : rw, 'addr' : addr, 'length' : length }
+    addr = int(addr) + (23e9/4096) * node  # remote memory is 23GB per machine
+    length = int(length) * int(pgSize)  # get in bytes
+    return {
+        'rid': rid,
+        'time': timestamp,
+        'node': node,
+        'rw': rw,
+        'addr': addr,
+        'length': length
+    }
+
 
 def readMemoryTrace(filename, node):
     '''
@@ -37,16 +47,24 @@ def readMemoryTrace(filename, node):
     with open(filename, 'r') as trace:
         return [readMemoryLine(line, node) for line in trace]
 
+
 def readDiskLine(line, time_offset, node):
     try:
         _, timestamp, _, addr, _, length, _, _, _, rw, _, _ = line.split()
     except ValueError:
         return None
     timestamp = time_offset + float(timestamp)
-    addr = int(addr)
-    length = int(length) * 4096 # disk block size = 4KB
+    addr = int(addr) + (77e9/4096) * node  # 77 GB of disk per machine
+    length = int(length) * 4096  # disk block size = 4KB
     rw = rw[0].lower()
-    return { 'time' : timestamp, 'node' : node, 'rw' : rw, 'addr' : addr, 'length' : length }
+    return {
+        'time': timestamp,
+        'node': node,
+        'rw': rw,
+        'addr': addr,
+        'length': length
+    }
+
 
 def readDiskTrace(diskFilename, tsFilename, node):
     '''
@@ -54,11 +72,12 @@ def readDiskTrace(diskFilename, tsFilename, node):
     So read offset and add to convert to epoch time.
     '''
     f = open(tsFilename, 'r')
-    offset = float(f.read())
+    offset = float(f.readline())
     f.close()
-    out = subprocess.check_output("blkparse {0} | grep java | python get_disk_io.py".format(diskFilename), shell = True)
+    out = subprocess.check_output("blkparse {0} | grep java | python get_disk_io.py".format(diskFilename), shell=True)
     out = out.split("\n")
-    return list(itertools.ifilter((lambda x:x is not None), (readDiskLine(line, offset, node) for line in out)))
+    return list(itertools.ifilter((lambda x: x is not None), (readDiskLine(line, offset, node) for line in out)))
+
 
 def readFiles(fileNames):
     fns = {}
@@ -77,7 +96,7 @@ def readFiles(fileNames):
         elif '-meta-' in fname:
             fns[node]['ts'] = name
         elif '-nic-' in fname:
-            continue #nic trace should be separate.
+            continue  # nic trace should be separate.
         else:
             assert(False)
 
@@ -86,72 +105,128 @@ def readFiles(fileNames):
         n = fns[node]
         mem = readMemoryTrace(n['mem'], node)
         disk = readDiskTrace(n['disk'], n['ts'], node)
-        nodes[node] = { 'mem':mem, 'disk':disk }
+        nodes[node] = {'mem': mem, 'disk': disk}
 
     return nodes
 
-def makeFlows(nodes):
-    random.seed(0)
-    hosts = random.sample(xrange(144), len(nodes))
 
-    print zip(range(10), hosts)
+def getTrafficData(nodes):
+    times = [f['time'] for f in itertools.chain(
+        itertools.chain.from_iterable(nodes[n]['disk'] for n in nodes.keys()),
+        itertools.chain.from_iterable(nodes[n]['mem'] for n in nodes.keys())
+    )]
+    earliestTime = min(times)
+    duration = max(times) - earliestTime
 
-    #this represents sequential address space assignment to nodes.
-    def which(node, addrRange, addr):
-        ind = range(len(nodes))
-        random.shuffle(ind)
-        return ind[min(int(addr/(addrRange/len(nodes))), len(nodes)-1)]
+    memAddrs = [m['addr'] for m in itertools.chain.from_iterable(nodes[n]['mem'] for n in nodes.keys())]
+    memRange = max(memAddrs) - min(memAddrs)
+    diskAddrs = [d['addr'] for d in itertools.chain.from_iterable(nodes[n]['disk'] for n in nodes.keys())]
+    diskRange = max(diskAddrs) - min(diskAddrs)
+
+    memTotalVolume = sum(m['length'] for m in itertools.chain.from_iterable(nodes[n]['mem'] for n in nodes.keys()))
+    diskTotalVolume = sum(d['length'] for d in itertools.chain.from_iterable(nodes[n]['disk'] for n in nodes.keys()))
+
+    memBandiwdthDemandPerUnit, diskBandwidthDemandPerUnit = ((memTotalVolume * 8) / (duration / 1e6)) / (memRange * 4096 / 1e9), ((diskTotalVolume * 8) / (duration / 1e6)) / (diskRange * 4096 / 1e9)
+
+    print 'ranges (page addressed)', memRange, diskRange
+    print 'duration (s)', duration / 1e6
+    print 'volumes (bytes)', memTotalVolume, diskTotalVolume
+    print 'bandwidth per unit resource (bps / 1 GB memory, bps / 1 GB disk)', memBandiwdthDemandPerUnit, diskBandwidthDemandPerUnit
+
+    return (earliestTime, duration, memRange, memTotalVolume, memBandiwdthDemandPerUnit, diskRange, diskTotalVolume, diskBandwidthDemandPerUnit)
+
+
+def makeFlows(nodes, data, opts):
+    random.seed(0)  # opts[0] = {res-based, rack-scale}, opts[1] for collapseFlows
+
+    if (opts[0] == 'res-based'):
+        hosts = range(len(nodes) * 2 + 3)  # len(nodes) cpus, len(nodes) memory, 3 disk
+    else:
+        hosts = range(len(nodes))
+
+    earliestTime, duration, memRange, memTotalVolume, memBandiwdthDemandPerUnit, diskRange, diskTotalVolume, diskBandwidthDemandPerUnit = data
 
     flows = []
-
-    earliestTime = min(f['time'] for f in sum((n['mem'] + n['disk'] for n in nodes.values()), []))
 
     for n in nodes:
         mems = nodes[n]['mem']
         memFlows = []
         if (len(mems) > 0):
-            memAddrs = [m['addr'] for m in mems]
-            memRange = max(memAddrs) - min(memAddrs)
-
+            memAddrs = [m['addr'] - ((23e9/4096) * m['node']) for m in mems]
+            localRange = max(memAddrs) - min(memAddrs)
             for mem in mems:
+                local_addr = m['addr'] - (23e9/4096) * mem['node']
+                h = int((local_addr / localRange) * len(nodes))
+                if (opts[0] == 'res-based'):
+                    h += len(nodes)  # there are as many memory nodes as CPU nodes.
+
                 if (mem['rw'] == 'r'):
-                    src = hosts[which(n, memRange, mem['addr'])]
+                    src = hosts[h]
                     dst = hosts[n]
                     typ = "memRead"
                 else:
                     src = hosts[n]
-                    dst = hosts[which(n, memRange, mem['addr'])]
+                    dst = hosts[h]
                     typ = "memWr"
                 if (src == dst):
+                    assert(opts[0] == 'rack-scale')
                     continue
-                memFlows.append({'time':mem['time'] - earliestTime, 'src':src, 'dst':dst, 'size':mem['length'], 'type':typ, 'disp-addr':str(n) + '-' + str(mem['addr']), 'addr': mem['addr']})
-            flows += collapseFlows(memFlows)
+
+                memFlows.append(
+                    {
+                        'time': mem['time'] - earliestTime,
+                        'src': src,
+                        'dst': dst,
+                        'size': mem['length'],
+                        'type': typ,
+                        'disp-addr': str(n) + '-' + str(mem['addr']),
+                        'addr': mem['addr']
+                    }
+                )
+            flows += collapseFlows(memFlows, opts[1])
 
         disks = nodes[n]['disk']
         diskFlows = []
         if (len(disks) > 0):
-            diskAddrs = [d['addr'] for d in disks]
-            diskRange = max(diskAddrs) - min(diskAddrs)
-
+            diskAddrs = [d['addr'] - (77e9/4096) * d['node'] for d in disks]
+            localRange = max(diskAddrs) - min(diskAddrs)
             for disk in disks:
+                local_addr = d['addr'] - (77e9/4096) * d['node']
+                if (opts[0] == 'res-based'):
+                    h = int((local_addr / localRange) * 3) + 2 * len(nodes)  # there are 3 disk nodes.
+                else:
+                    h = int((local_addr / localRange) * len(nodes))
+
                 if (disk['rw'] == 'r'):
-                    src = hosts[which(n, diskRange, disk['addr'])]
+                    src = hosts[h]
                     dst = hosts[n]
                     typ = "diskRead"
                 else:
                     src = hosts[n]
-                    dst = hosts[which(n, diskRange, disk['addr'])]
+                    dst = hosts[h]
                     typ = "diskWr"
                 if (src == dst):
+                    assert(opts[0] == 'rack-scale')
                     continue
-                diskFlows.append({'time':disk['time'] - earliestTime, 'src':src, 'dst':dst, 'size':disk['length'], 'type':typ, 'disp-addr':str(n) + '-' + str(disk['addr']), 'addr':disk['addr']})
-            flows += collapseFlows(diskFlows)
+
+                diskFlows.append(
+                    {
+                        'time': disk['time'] - earliestTime,
+                        'src': src,
+                        'dst': dst,
+                        'size': disk['length'],
+                        'type': typ,
+                        'disp-addr': str(n) + '-' + str(disk['addr']),
+                        'addr': disk['addr']
+                    }
+                )
+            flows += collapseFlows(diskFlows, opts[1])
 
         print n, len(flows)
     return flows
 
-# disk flows should be combined so that requests for sequential addresses are the same flow
-def collapseFlows(flows):
+
+def collapseFlows(flows, opts):
     def combine(fs):
         first = fs[0]
         time = first['time']
@@ -161,12 +236,12 @@ def collapseFlows(flows):
         addr = first['addr']
         dispaddr = first['disp-addr']
         totalSize = sum(f['size'] for f in fs)
-        return {'time':time, 'src':src, 'dst':dst, 'type':typ, 'size':totalSize, 'addr': addr, 'disp-addr': dispaddr}
+        return {'time': time, 'src': src, 'dst': dst, 'type': typ, 'size': totalSize, 'addr': addr, 'disp-addr': dispaddr}
 
     # fs are flows with same src and dest
     # should group sets of flows that are consecutive and separated by no more than delta = 10 us
     def grouper(fs):
-        #dictionary of flow groups. key = (next expected address, time horizon), value = flows in group so far
+        # dictionary of flow groups. key = (next expected address, time horizon), value = flows in group so far
         groups = {}
         for f in fs:
             found = None
@@ -175,17 +250,17 @@ def collapseFlows(flows):
                     found = (addr, horizon)
                     break
                 elif (f['time'] > horizon):
-                    #because flows are sorted by time, if we pass the horizon we yield the group.
+                    # because flows are sorted by time, if we pass the horizon we yield the group.
                     yield groups[(addr, horizon)]
                     del groups[(addr, horizon)]
             if (found is not None):
                 grp = groups[found]
                 del groups[found]
                 grp.append(f)
-                groups[(f['addr'] + f['size'] / 4096, f['time'] + 1000)] = grp
+                groups[(f['addr'] + f['size'] / 4096, f['time'] + 10)] = grp
             else:
-                groups[(f['addr'] + f['size'] / 4096, f['time'] + 1000)] = [f]
-        #yield remaining groups
+                groups[(f['addr'] + f['size'] / 4096, f['time'] + 10)] = [f]
+        # yield remaining groups
         for grp in groups.values():
             yield grp
 
@@ -207,33 +282,57 @@ def collapseFlows(flows):
                 groups[f['time'] + 10] = grp
             else:
                 groups[f['time'] + 10] = [f]
-        #yield remaining groups
+        # yield remaining groups
         for grp in groups.values():
             yield grp
 
+    if (opts == "none"):
+        return flows
+    grp = grouper_timeOnly if opts == "tonly" else grouper
 
     hosts = set(f['src'] for f in flows) | set(f['dst'] for f in flows)
-    sdpairs = sum(([(i,j) for j in hosts if i != j] for i in hosts), [])
-    sdflows = {(s,d):[f for f in flows if f['src'] == s and f['dst'] == d] for s,d in sdpairs}
+    sdpairs = sum(([(i, j) for j in hosts if i != j] for i in hosts), [])
+    sdflows = {(s, d): [f for f in flows if f['src'] == s and f['dst'] == d] for s, d in sdpairs}
     collapsed = []
     for sd in sdflows.keys():
         fs = sdflows[sd]
-        fs.sort(key = lambda f:f['time'])
+        fs.sort(key=lambda f: f['time'])
         if (len(fs) > 0):
-            collapsed += list(map(combine, grouper_timeOnly(fs)))
-    collapsed.sort(key = lambda f:f['time'])
+            collapsed += list(map(combine, grp(fs)))
+    collapsed.sort(key=lambda f: f['time'])
     return collapsed
+
+
+def plotAddressAccessOverTime(flows, prefix=None):
+    memFlows = [f for f in flows if 'mem' in f['type']]
+    memFlows.sort(key=lambda x: x['time'])
+    times = [f['time'] for f in memFlows]
+    addrs = [f['addr'] for f in memFlows]
+
+    plt.clf()
+    plt.cla()
+    plt.title('Addresses Accessed Over Time')
+    plt.xlabel('Time')
+    plt.ylabel('Address')
+    plt.plot(times, addrs, 'b.')
+    plt.savefig('address_accesses.png')
 
 if __name__ == '__main__':
     if (len(sys.argv) < 2):
         print 'Usage: python makeFlowTrace.py <outfile> <IO traces...>'
         sys.exit(1)
-    outfname = sys.argv[1]
+    outDir = sys.argv[1]
     nodes = readFiles(sys.argv[2:])
-    flows = makeFlows(nodes)
-    fid = 0
-    with open(outfname, 'w') as of:
-        for f in flows:
-            of.write("{0} {1} {2} {3} {4} {5} {6}\n".format(fid, "%.9f" % f['time'], f['src'], f['dst'], f['size'], f['type'], f['disp-addr']))
-            fid += 1
-
+    data = getTrafficData(nodes)
+    print data
+    for arrangement in ['res-based', 'rack-scale']:
+        for opt in ['plain', 'combined', 'timeonly']:
+            print "{0}{1}_{2}_flows.txt".format(outDir, arrangement, opt)
+            flows = makeFlows(nodes, data, (arrangement, opt))
+            #  plotAddressAccessOverTime(flows)
+            fid = 0
+            with open("{0}{1}_{2}_flows.txt".format(outDir, arrangement, opt), 'w') as of:
+                for f in flows:
+                    of.write("{0} {1} {2} {3} {4} {5} {6}\n".format(fid, "%.9f" % f['time'], f['src'], f['dst'], f['size'], f['type'], f['disp-addr']))
+                    fid += 1
+            del flows

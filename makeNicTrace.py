@@ -29,10 +29,10 @@ def mapNicHostnameToNodes(nodes):
     def strip_port(hostname):
         return hostname.split('.')[0]
 
-    #pdb.set_trace()
     stringToNodeMap = {}
     for n in nodes.keys():
         intersect = reduce(lambda s1, s2: s1 & s2, (set(map(strip_port, (f['src'], f['dst']))) for f in nodes[n]))
+        pdb.set_trace()
         if (len(intersect) != 1):
             print intersect
             assert(False)
@@ -40,7 +40,7 @@ def mapNicHostnameToNodes(nodes):
     return stringToNodeMap
 
 def makeFlows(nodes):
-    #mapping = mapNicHostnameToNodes(nodes)
+    mapping = mapNicHostnameToNodes(nodes)
     random.seed(0)
     hosts = random.sample(xrange(144), len(nodes))
 
