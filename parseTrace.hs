@@ -20,8 +20,17 @@ instance Show Record where
 
 -- "Usage: ./parseTrace.hs <out file> <trace files...>"
 main = do
-    args <- getArgs
-    --let args = ["tmp2", "traces/wordcount_with_nic/0-nic-ec2-54-161-230-217.compute-1.amazonaws.com"]
+    --args <- getArgs
+    let args = ["results_hs/wordcount/", 
+                "traces/wordcount_with_nic/0-disk-ec2-54-161-230-217.compute-1.amazonaws.com.blktrace.0",
+                "traces/wordcount_with_nic/0-mem-ec2-54-161-230-217.compute-1.amazonaws.com",
+                "traces/wordcount_with_nic/0-meta-ec2-54-161-230-217.compute-1.amazonaws.com",
+                "traces/wordcount_with_nic/0-nic-ec2-54-161-230-217.compute-1.amazonaws.com",
+                "traces/wordcount_with_nic/1-disk-ec2-54-163-84-189.compute-1.amazonaws.com.blktrace.0",
+                "traces/wordcount_with_nic/1-mem-ec2-54-163-84-189.compute-1.amazonaws.com",
+                "traces/wordcount_with_nic/1-meta-ec2-54-163-84-189.compute-1.amazonaws.com",
+                "traces/wordcount_with_nic/1-nic-ec2-54-163-84-189.compute-1.amazonaws.com"
+                ]
     let traceFiles = tail args
     let readTraceFile fileName =
             if "-disk-" `List.isInfixOf` fileName
@@ -41,7 +50,15 @@ main = do
                     Map.fromList $ 
                     zip (map stripDirectory traceFiles) (map lines traces)
         nicFlows = makeNicFlows $ snd records
-      in  writeFlows (head args) nicFlows
+        maker = makeFlows (fst records)
+        
+        archs = ["rack-scale", "res-based"]
+        opts = ["plain", "combined", "timeonly"]
+        perms = foldl (++) [] $ map (\a -> (map (\b -> (a,b)) opts)) archs
+        fns = map (\(a,b) -> (head args) ++ a ++ "_" ++ b ++ "_flows.txt") perms
+        results = map (\(arch, opt) -> maker arch opt) perms
+        
+        in writeResults $ zip fns results
 
 -- Processing Phase
 
@@ -117,7 +134,7 @@ makeNicFlows nicMap =
     in  map (makeNicFlow nicMapping) $ Map.foldl (++) [] nicMap
 
 makeFlows :: Map.Map Int [Record] -> String -> String -> [Flow]
-makeFlows records model  option = 
+makeFlows records model option = 
     let 
         numNodes = Map.size records
         isMem = ((List.isPrefixOf "mem") . rtag)
@@ -217,6 +234,9 @@ makeFlows records model  option =
 
 
 -- IO Out Phase
+
+writeResults :: [(String, [Flow])] -> IO()
+writeResults = mapM_ (\(f, fs) -> writeFlows f fs) 
 
 writeFlows :: String -> [Flow] -> IO ()
 writeFlows fileName []    = putStrLn "No Flows to Write"

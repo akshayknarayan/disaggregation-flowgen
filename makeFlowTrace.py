@@ -12,6 +12,13 @@ import matplotlib.pyplot as plt
 
 # import pdb
 
+ARCH_RACK_SCALE = 'rack-scale'
+ARCH_RES_BASED = 'res-based'
+
+COMB_NONE = 'plain'
+COMB_TIMEONLY = 'timeonly'
+COMB_ALL = 'combined'
+
 
 def readMemoryLine(line, node):
     '''
@@ -139,7 +146,7 @@ def getTrafficData(nodes):
 def makeFlows(nodes, data, opts):
     random.seed(0)  # opts[0] = {res-based, rack-scale}, opts[1] for collapseFlows
 
-    if (opts[0] == 'res-based'):
+    if (opts[0] == ARCH_RES_BASED):
         hosts = range(len(nodes) * 2 + 3)  # len(nodes) cpus, len(nodes) memory, 3 disk
     else:
         hosts = range(len(nodes))
@@ -157,7 +164,7 @@ def makeFlows(nodes, data, opts):
             for mem in mems:
                 local_addr = m['addr'] - (23e9/4096) * mem['node']
                 h = int((local_addr / localRange) * len(nodes))
-                if (opts[0] == 'res-based'):
+                if (opts[0] == ARCH_RES_BASED):
                     h += len(nodes)  # there are as many memory nodes as CPU nodes.
 
                 if (mem['rw'] == 'r'):
@@ -169,7 +176,7 @@ def makeFlows(nodes, data, opts):
                     dst = hosts[h]
                     typ = "memWr"
                 if (src == dst):
-                    assert(opts[0] == 'rack-scale')
+                    assert(opts[0] == ARCH_RACK_SCALE)
                     continue
 
                 memFlows.append(
@@ -192,7 +199,7 @@ def makeFlows(nodes, data, opts):
             localRange = max(diskAddrs) - min(diskAddrs)
             for disk in disks:
                 local_addr = d['addr'] - (77e9/4096) * d['node']
-                if (opts[0] == 'res-based'):
+                if (opts[0] == ARCH_RES_BASED):
                     h = int((local_addr / localRange) * 3) + 2 * len(nodes)  # there are 3 disk nodes.
                 else:
                     h = int((local_addr / localRange) * len(nodes))
@@ -206,7 +213,7 @@ def makeFlows(nodes, data, opts):
                     dst = hosts[h]
                     typ = "diskWr"
                 if (src == dst):
-                    assert(opts[0] == 'rack-scale')
+                    assert(opts[0] == ARCH_RACK_SCALE)
                     continue
 
                 diskFlows.append(
@@ -286,9 +293,14 @@ def collapseFlows(flows, opts):
         for grp in groups.values():
             yield grp
 
-    if (opts == "none"):
+    if (opts == COMB_NONE):
         return flows
-    grp = grouper_timeOnly if opts == "tonly" else grouper
+    grp = None
+    if (opts == COMB_TIMEONLY):
+        grp = grouper_timeOnly
+    elif (opts == COMB_ALL):
+        grp = grouper
+    assert(grp is not None)
 
     hosts = set(f['src'] for f in flows) | set(f['dst'] for f in flows)
     sdpairs = sum(([(i, j) for j in hosts if i != j] for i in hosts), [])
@@ -325,8 +337,8 @@ if __name__ == '__main__':
     nodes = readFiles(sys.argv[2:])
     data = getTrafficData(nodes)
     print data
-    for arrangement in ['res-based', 'rack-scale']:
-        for opt in ['plain', 'combined', 'timeonly']:
+    for arrangement in [ARCH_RES_BASED, ARCH_RACK_SCALE]:
+        for opt in [COMB_NONE, COMB_TIMEONLY, COMB_ALL]:
             print "{0}{1}_{2}_flows.txt".format(outDir, arrangement, opt)
             flows = makeFlows(nodes, data, (arrangement, opt))
             #  plotAddressAccessOverTime(flows)
