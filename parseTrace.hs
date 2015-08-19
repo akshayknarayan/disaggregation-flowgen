@@ -6,10 +6,11 @@ import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified Data.Char as Char
 import qualified System.Process as Cmd
+import Text.Printf
 
 data Flow = Flow {ftime :: Float, src :: Int, dst :: Int, size :: Int, ftag :: String, faddr :: Int}
 instance Show Flow where
-    show flow = unwords $ map ($ flow) [show . ftime, show . src, show . dst, show . size, ftag]
+    show flow = unwords $ map ($ flow) [(printf "%.9f") . ftime, show . src, show . dst, show . size, ftag]
 
 data Record = Record {node :: Int, rtime :: Float, addr :: Int, rlength :: Int, rtag :: String}
 instance Show Record where
@@ -241,10 +242,13 @@ writeResults = mapM_ (\(f, fs) -> writeFlows f fs)
 
 writeFlows :: String -> [Flow] -> IO ()
 writeFlows fileName []    = putStrLn "No Flows to Write"
-writeFlows fileName flows = writeFile fileName $ 
+writeFlows fileName flows = do
+                    putStrLn (show (length flows))
+                    putStrLn fileName
+                    writeFile fileName $ 
                                 unlines $ 
                                 map (\x -> fst x ++ " " ++ snd x) $
                                 zip [show x | x <- [1,2..]] $ 
-                                map show $
-                                filter (\f -> (src f /= (-1) && dst f /= (-1))) flows
+                                map show flows
+                                --filter (\f -> (src f /= (-1) && dst f /= (-1))) flows
 
