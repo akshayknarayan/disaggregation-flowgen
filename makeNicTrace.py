@@ -1,15 +1,15 @@
 #!/usr/bin/python
 
 import sys
-import itertools
 import random
-import numpy as np
 
 import pdb
+
 
 def readFlows(fname):
     with open(fname) as f:
         return map(lambda l:{'time':float(l[0]), 'src':l[1].split('.')[0], 'dst':l[2][:-1].split('.')[0], 'size':int(l[3])}, (l.split() for l in f.readlines()))
+
 
 def readFiles(fnames):
     fns = {}
@@ -25,6 +25,7 @@ def readFiles(fnames):
 
     return {node:readFlows(fns[node]) for node in fns.keys()}
 
+
 def mapNicHostnameToNodes(nodes):
     def strip_port(hostname):
         return hostname.split('.')[0]
@@ -39,6 +40,7 @@ def mapNicHostnameToNodes(nodes):
         stringToNodeMap[intersect.pop()] = n
     return stringToNodeMap
 
+
 def makeFlows(nodes):
     mapping = mapNicHostnameToNodes(nodes)
     random.seed(0)
@@ -47,12 +49,12 @@ def makeFlows(nodes):
     earliestTime = min(f['time'] for f in sum(nodes.values(), []))
     return sorted(sum((
         [{
-        'time':1e6*(f['time'] - earliestTime),
-        'src':f['src'], #hosts[int(mapping[f['src']])],
-        'dst':f['dst'], #hosts[int(mapping[f['dst']])],
-        'size':f['size']
+        'time': 1e6*(f['time'] - earliestTime),
+        'src': f['src'], #hosts[int(mapping[f['src']])],
+        'dst': f['dst'], #hosts[int(mapping[f['dst']])],
+        'size': f['size']
         } for f in nodes[n]]
-        for n in nodes), []), key = lambda f:f['time'])
+        for n in nodes), []), key=lambda f: f['time'])
 
 if __name__ == '__main__':
     if (len(sys.argv) < 2):
