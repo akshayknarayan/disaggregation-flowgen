@@ -3,7 +3,8 @@
 import sys
 import subprocess
 
-traces = ['wordcount', 'graphlab', 'terasort', 'memcached']
+# traces = ['wordcount', 'graphlab', 'terasort', 'memcached']
+traces = ['wordcount_hadoop']
 template = 'bash -c "python makeFlowTrace.py results/{0}/ traces/{0}_with_nic/*"'
 
 if (len(sys.argv) > 1):

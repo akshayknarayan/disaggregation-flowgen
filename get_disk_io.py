@@ -1,6 +1,4 @@
 import sys
-import os
-import time
 import re
 
 while True:
@@ -13,7 +11,7 @@ while True:
         minor = int(lineArr[0].split(",")[1])
         cpu = int(lineArr[1])
         seq = int(lineArr[2])
-        time = float(lineArr[3])
+        ltime = float(lineArr[3])
         pid = int(lineArr[4])
         action = lineArr[5]
         rw = lineArr[6]
@@ -26,4 +24,4 @@ while True:
             # action classifiers through IO event lifetime: Q G I D C
             # Q = queued, D = issue(d)/started, C = complete
             if action == "D" and proc[0] == "[java]":
-                print "Time:", time, " Offset:", offset, " Size:", size, " Action:", action, " RW:", rw, " Proc:", proc
+                print "Time:", ltime, " Offset:", offset, " Size:", size, " Action:", action, " RW:", rw, " Proc:", proc

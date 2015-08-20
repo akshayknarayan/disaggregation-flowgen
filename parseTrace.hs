@@ -8,6 +8,8 @@ import qualified Data.Char as Char
 import qualified System.Process as Cmd
 import Text.Printf
 
+import Debug.Trace
+
 data Flow = Flow {ftime :: Float, src :: Int, dst :: Int, size :: Int, ftag :: String, faddr :: Int}
 instance Show Flow where
     show flow = unwords $ map ($ flow) [(printf "%.9f") . ftime, show . src, show . dst, show . size, ftag]
@@ -16,22 +18,16 @@ data Record = Record {node :: Int, rtime :: Float, addr :: Int, rlength :: Int, 
 instance Show Record where
     show record = unwords $ map ($ record) [show . node, show . rtime, show . addr, show . rlength, rtag]
 
-
 -- IO In Phase
 
 -- "Usage: ./parseTrace.hs <out file> <trace files...>"
 main = do
     args <- getArgs
-   -- let args = ["results_hs/wordcount/", 
-   --             "traces/wordcount_with_nic/0-disk-ec2-54-161-230-217.compute-1.amazonaws.com.blktrace.0",
-   --             "traces/wordcount_with_nic/0-mem-ec2-54-161-230-217.compute-1.amazonaws.com",
-   --             "traces/wordcount_with_nic/0-meta-ec2-54-161-230-217.compute-1.amazonaws.com",
-   --             "traces/wordcount_with_nic/0-nic-ec2-54-161-230-217.compute-1.amazonaws.com"--,
-   --             --"traces/wordcount_with_nic/1-disk-ec2-54-163-84-189.compute-1.amazonaws.com.blktrace.0",
-   --             --"traces/wordcount_with_nic/1-mem-ec2-54-163-84-189.compute-1.amazonaws.com",
-   --             --"traces/wordcount_with_nic/1-meta-ec2-54-163-84-189.compute-1.amazonaws.com",
-   --             --"traces/wordcount_with_nic/1-nic-ec2-54-163-84-189.compute-1.amazonaws.com"
-   --             ]
+    --let args = 
+    --        [
+    --            "results_hs/wordcount/", 
+    --            "0-mem-test"
+    --        ]
     let traceFiles = tail args
     let readTraceFile fileName =
             if "-disk-" `List.isInfixOf` fileName
@@ -47,20 +43,21 @@ main = do
             if ([] == dropWhile (/= '/') fileName) 
             then fileName 
             else (stripDirectory (tail (List.dropWhile (/='/') fileName)))
-        records = readFlows $ 
+    let records = readFlows $ 
                     Map.fromList $ 
                     zip (map stripDirectory traceFiles) (map lines traces)
-        nicFlows = makeNicFlows $ snd records
-        maker = makeFlows (fst records)
+    let nicFlows = makeNicFlows $ snd records
+
+    let maker = makeFlows (fst records)
         
-        archs = ["rack-scale", "res-based"]
-        opts = ["plain", "combined", "timeonly"]
-        perms = foldl (++) [] $ map (\a -> (map (\b -> (a,b)) opts)) archs
-        fns = map (\(a,b) -> (head args) ++ a ++ "_" ++ b ++ "_flows.txt") perms
-        results = map (\(arch, opt) -> maker arch opt) perms
-        
-        in writeFlows ((head args) ++ "nic_flows.txt") nicFlows
-        --in writeResults $ zip fns results
+    let archs = ["rack-scale", "res-based"]
+    let opts = ["plain", "combined", "timeonly"]
+    let perms = foldl (++) [] $ map (\a -> (map (\b -> (a,b)) opts)) archs
+    let fns = map (\(a,b) -> (head args) ++ a ++ "_" ++ b ++ "_flows.txt") perms
+    let results = map (\(arch, opt) -> maker arch opt) perms
+    
+    --writeFlows ((head args) ++ "nic_flows.txt") nicFlows
+    writeResults $ zip fns results
 
 -- Processing Phase
 
@@ -115,7 +112,7 @@ readFlows traceMap =
                 }
         diskRecords = getRecords readDiskFlow $ traceMapFilter "-disk-";
     -- *Records are all Map.Map Int [Record].
-    in  (Map.fromListWith (++) $ foldl (++) [] $ map Map.toList [metaRecords, memRecords, diskRecords], nicRecords)
+    in  (Map.fromListWith (++) $ List.foldl' (++) [] $ map Map.toList [metaRecords, memRecords, diskRecords], nicRecords)
 
 
 makeNicFlows :: Map.Map Int [Record] -> [Flow]
@@ -160,7 +157,7 @@ makeFlows records model option =
                 memNodeCase = (fromIntegral $ addr record) / (fromIntegral $ fst range) :: Float
                 diskNodeCase = (fromIntegral $ addr record) / (fromIntegral $ snd range) :: Float
         
-        allRecords = filter (\r -> not ("meta" == (rtag r))) $ foldl (++) [] $ Map.elems records
+        allRecords = List.foldl' (++) [] $ Map.elems records
         -- meta map : node id -> start time
         metaRecords = Map.fromList $
             map (\r -> (node r, rtime r)) $
@@ -184,7 +181,7 @@ makeFlows records model option =
                 faddr = addr record
                 }
             | (isDisk record) && ("Read" `List.isSuffixOf` (rtag record)) = Flow {
-                ftime = (rtime record) - (metaRecords Map.! (node record)), 
+                ftime = 1e6 * (rtime record) + (metaRecords Map.! (node record)), -- disk record is in seconds, meta is in microseconds.
                 src = mapToNode record,
                 dst = node record,
                 size = rlength record,
@@ -192,7 +189,7 @@ makeFlows records model option =
                 faddr = addr record
                 }
             | (isDisk record) && ("Write" `List.isSuffixOf` (rtag record)) = Flow {
-                ftime = rtime record - (metaRecords Map.! (node record)), 
+                ftime = 1e6 * (rtime record) + (metaRecords Map.! (node record)),  -- disk record is in seconds, meta is in microseconds.
                 src = node record,
                 dst = mapToNode record,
                 size = rlength record,
@@ -202,7 +199,7 @@ makeFlows records model option =
 
         -- combining
 
-        grp = foldl1 (\agg f -> Flow {
+        grp = List.foldl1' (\agg f -> Flow {
                 ftime = (ftime agg), 
                 src = (src agg), 
                 dst = (dst agg), 
@@ -214,25 +211,37 @@ makeFlows records model option =
 
         combine :: (Flow -> Flow -> Bool) -> [Flow] -> [Flow] -> [Flow] -> [Flow]
         combine fn res agg [] = res ++ [grp agg]
+        combine fn res [] (f:fs) = combine fn res [f] fs
         combine fn res agg (f:fs) = 
-            let old = tail agg
-            in  if fn (last agg) f 
+            let old = last agg
+            in  if fn old f 
                 then combine fn res (agg ++ [f]) fs 
                 else combine fn (res ++ [grp agg]) [f] fs
         
+        combine' :: (Flow -> Flow -> Bool) -> [Flow] -> [Flow] -> [Flow]
+        combine' fn [] [] = []
+        combine' fn agg [] = agg
+        combine' fn [] (f:fs) = combine' fn [f] fs
+        combine' fn agg (f:fs) = 
+            if fn (last agg) f 
+            then combine' fn (agg ++ [f]) fs 
+            else (grp agg) : combine' fn [f] fs
+
         combineFlows :: String -> [Flow] -> [Flow]
         combineFlows "plain" flows = flows
         combineFlows "combined" flows = 
             let 
                 seqAddr old f = faddr old + size old == faddr f
                 fn a b = (seqAddr a b && seqTime a b)
-            in combine fn [] [] flows
-        combineFlows "timeOnly" flows = combine seqTime [] [] flows
+            in combine' fn [] flows
+            --in combine fn [] [] flows
+        combineFlows "timeonly" flows = combine' seqTime [] flows
+        --combineFlows "timeonly" flows = combine seqTime [] [] flows  
         
     in  List.sortBy (compare `on` ftime) $
-        foldl (++) [] $ Map.elems $ Map.map (combineFlows option) $
+        List.foldl' (++) [] $ Map.elems $ Map.map (combineFlows option) $
         Map.fromListWith (++) $ map (\f -> ((src f, dst f), [f])) $ 
-        map recordToFlow allRecords
+        map recordToFlow $ filter (\f -> not (rtag f == "meta")) allRecords
 
 
 -- IO Out Phase

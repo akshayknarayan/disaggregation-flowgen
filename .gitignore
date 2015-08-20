@@ -1,2 +1,4 @@
 traces/
 *.txt
+*.hi
+*.o
