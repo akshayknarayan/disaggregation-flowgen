@@ -33,7 +33,7 @@ def mapNicHostnameToNodes(nodes):
     stringToNodeMap = {}
     for n in nodes.keys():
         intersect = reduce(lambda s1, s2: s1 & s2, (set(map(strip_port, (f['src'], f['dst']))) for f in nodes[n]))
-        pdb.set_trace()
+#        pdb.set_trace()
         if (len(intersect) != 1):
             print intersect
             assert(False)
@@ -42,16 +42,16 @@ def mapNicHostnameToNodes(nodes):
 
 
 def makeFlows(nodes):
-    mapping = mapNicHostnameToNodes(nodes)
+#    mapping = mapNicHostnameToNodes(nodes)
     random.seed(0)
     hosts = random.sample(xrange(144), len(nodes))
 
     earliestTime = min(f['time'] for f in sum(nodes.values(), []))
     return sorted(sum((
         [{
-        'time': 1e6*(f['time'] - earliestTime),
-        'src': f['src'], #hosts[int(mapping[f['src']])],
-        'dst': f['dst'], #hosts[int(mapping[f['dst']])],
+        'time': f['time'] - earliestTime,
+        'src': f['src'], # hosts[int(mapping[f['src']])],
+        'dst': f['dst'], # hosts[int(mapping[f['dst']])],
         'size': f['size']
         } for f in nodes[n]]
         for n in nodes), []), key=lambda f: f['time'])

@@ -346,22 +346,25 @@ def writeFlows(flows, outDir, arrangement, opt):
             of.write("{0} {1} {2} {3} {4} {5} {6}\n".format(fid, "%.9f" % f['time'], f['src'], f['dst'], f['size'], f['type'], f['disp-addr']))
             fid += 1
 
-if __name__ == '__main__':
-    if (len(sys.argv) < 2):
-        print 'Usage: python makeFlowTrace.py <outfile> <IO traces...>'
-        sys.exit(1)
-    outDir = sys.argv[1]
-    nodes = readFiles(sys.argv[2:])
+
+def run(outDir, traces):
+    nodes = readFiles(traces)
     data = getTrafficData(nodes)
     print data
-    for arrangement in [ARCH_RES_BASED]:
+    for arrangement in [ARCH_RES_BASED, ARCH_RACK_SCALE]:
         flows = makeFlows(nodes, data, (arrangement, COMB_NONE))
-        # writeFlows(flows, outDir, arrangement, COMB_NONE)
+        writeFlows(flows, outDir, arrangement, COMB_NONE)
 
-        for opt in [COMB_TIMEONLY, COMB_ALL]:
+        for opt in [COMB_TIMEONLY]:
             print "{0}{1}_{2}_flows.txt".format(outDir, arrangement, opt)
             col_flows = collapseFlows(flows, opt)
             print len(col_flows)
             #  plotAddressAccessOverTime(flows)
             writeFlows(col_flows, outDir, arrangement, opt)
-        del flows
+
+
+if __name__ == '__main__':
+    if (len(sys.argv) < 2):
+        print 'Usage: python makeFlowTrace.py <outfile> <IO traces...>'
+        sys.exit(1)
+    run(sys.argv[1], sys.argv[2:])
