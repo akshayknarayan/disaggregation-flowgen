@@ -188,8 +188,8 @@ if __name__ == '__main__':
     print 'read', len(flows), 'flows'
 
     flowSizes(flows, prefix=mode)
-    #  sdAnalysis(flows)
+    # sdAnalysis(flows)
     sourceInterarrival(flows, prefix=mode)
     burstinessAnalysis(flows, prefix=mode)
 
-    # outputSimulatorFriendly('sim_'+sys.argv[1], flows)
+    outputSimulatorFriendly('sim_'+sys.argv[1], flows)
