@@ -91,6 +91,8 @@ def readFiles(fileNames):
     fns = {}
     for name in fileNames:
         fname = name.split('/')[-1]
+        if fname == 'traceinfo.txt':
+            continue
         node = int(fname.split('-')[0])
         if node not in fns:
             fns[node] = {}
@@ -172,15 +174,15 @@ def makeFlows(nodes, data, opts):
                     h += numNodes  # there are as many memory nodes as CPU nodes.
 
                 if (mem['rw'] == 'r'):
-                    src = hosts[h]
+                    src = hosts[h if h < len(hosts) else (len(hosts) - 1)]
                     dst = hosts[n]
                     typ = "memRead"
                 else:
                     src = hosts[n]
-                    dst = hosts[h]
+                    dst = hosts[h if h < len(hosts) else (len(hosts) - 1)]
                     typ = "memWr"
                 if (src == dst):
-                    assert (opts[0] == ARCH_RACK_SCALE), "mem {} {} {} {}".format(opts[0], h, n, numNodes)
+                    assert (opts[0] == ARCH_RACK_SCALE), "mem {} {} {} {} {} {}".format(opts[0], h, n, numNodes, src, dst)
                     continue
 
                 memFlows.append(
@@ -211,12 +213,12 @@ def makeFlows(nodes, data, opts):
                     h = int((d['addr'] / localRange) * numNodes)
 
                 if (disk['rw'] == 'r'):
-                    src = hosts[h]
+                    src = hosts[h if h < len(hosts) else (len(hosts) - 1)]
                     dst = hosts[n]
                     typ = "diskRead"
                 else:
                     src = hosts[n]
-                    dst = hosts[h]
+                    dst = hosts[h if h < len(hosts) else (len(hosts) - 1)]
                     typ = "diskWr"
                 if (src == dst):
                     assert (opts[0] == ARCH_RACK_SCALE), "disk {} {} {} {}".format(opts[0], h, n, numNodes)
@@ -351,7 +353,7 @@ def run(outDir, traces):
     nodes = readFiles(traces)
     data = getTrafficData(nodes)
     print data
-    for arrangement in [ARCH_RES_BASED, ARCH_RACK_SCALE]:
+    for arrangement in [ARCH_RACK_SCALE]:
         flows = makeFlows(nodes, data, (arrangement, COMB_NONE))
         writeFlows(flows, outDir, arrangement, COMB_NONE)
 
