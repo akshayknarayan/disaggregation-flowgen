@@ -3,27 +3,25 @@
 import sys
 import random
 
-import pdb
+# import pdb
 
 
 def readFlows(fname):
     with open(fname) as f:
-        return map(lambda l:{'time':float(l[0]), 'src':l[1].split('.')[0], 'dst':l[2][:-1].split('.')[0], 'size':int(l[3])}, (l.split() for l in f.readlines()))
+        return map(lambda l: {'time': float(l[0]), 'src': l[1].split('.')[0], 'dst': l[2][:-1].split('.')[0], 'size': int(l[3])}, (l.split() for l in f.readlines()))
 
 
 def readFiles(fnames):
     fns = {}
     for fname in fnames:
         node = fname.split('/')[-1].split('-')[0]
-        #pdb.set_trace()
+        # pdb.set_trace()
         if ('-nic-' in fname):
             fns[node] = fname
-        elif ('-mem-' in fname or '-disk-' in fname or '-meta-' in fname):
-            continue
         else:
-            assert(False)
+            continue
 
-    return {node:readFlows(fns[node]) for node in fns.keys()}
+    return {node: readFlows(fns[node]) for node in fns.keys()}
 
 
 def mapNicHostnameToNodes(nodes):
@@ -42,19 +40,18 @@ def mapNicHostnameToNodes(nodes):
 
 
 def makeFlows(nodes):
-#    mapping = mapNicHostnameToNodes(nodes)
+    # mapping = mapNicHostnameToNodes(nodes)
     random.seed(0)
-    hosts = random.sample(xrange(144), len(nodes))
+    # hosts = random.sample(xrange(144), len(nodes))
 
     earliestTime = min(f['time'] for f in sum(nodes.values(), []))
-    return sorted(sum((
-        [{
-        'time': f['time'] - earliestTime,
-        'src': f['src'], # hosts[int(mapping[f['src']])],
-        'dst': f['dst'], # hosts[int(mapping[f['dst']])],
-        'size': f['size']
-        } for f in nodes[n]]
-        for n in nodes), []), key=lambda f: f['time'])
+    return sorted(sum(([{
+                      'time': f['time'] - earliestTime,
+                      'src': f['src'],  # hosts[int(mapping[f['src']])],
+                      'dst': f['dst'],  # hosts[int(mapping[f['dst']])],
+                      'size': f['size']
+                      } for f in nodes[n]]
+                  for n in nodes), []), key=lambda f: f['time'])
 
 if __name__ == '__main__':
     if (len(sys.argv) < 2):
