@@ -4,7 +4,7 @@ import sys
 import subprocess
 
 # traces = ['wordcount', 'graphlab', 'terasort', 'memcached']
-traces = ['wordcount']
+traces = ['wordcount-hadoop', 'terasort', 'memcached']
 template = 'bash -c "pypy makeFlowTrace.py results/{0}/ traces/{0}_with_nic/*"'
 nic_template = 'bash -c "pypy makeNicTrace.py results/{0}/ traces/{0}_with_nic/*"'
 
