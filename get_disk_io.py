@@ -23,5 +23,5 @@ while True:
 
             # action classifiers through IO event lifetime: Q G I D C
             # Q = queued, D = issue(d)/started, C = complete
-            if action == "D" and proc[0] == "[java]":
+            if action == "D":  # and proc[0] == "[java]":
                 print "Time:", ltime, " Offset:", offset, " Size:", size, " Action:", action, " RW:", rw, " Proc:", proc

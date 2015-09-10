@@ -3,27 +3,25 @@
 import sys
 import random
 
-import pdb
+# import pdb
 
 
 def readFlows(fname):
     with open(fname) as f:
-        return map(lambda l:{'time':float(l[0]), 'src':l[1].split('.')[0], 'dst':l[2][:-1].split('.')[0], 'size':int(l[3])}, (l.split() for l in f.readlines()))
+        return map(lambda l: {'time': float(l[0]), 'src': l[1].split('.')[0], 'dst': l[2][:-1].split('.')[0], 'size': int(l[3])}, (l.split() for l in f.readlines()))
 
 
 def readFiles(fnames):
     fns = {}
     for fname in fnames:
         node = fname.split('/')[-1].split('-')[0]
-        #pdb.set_trace()
+        # pdb.set_trace()
         if ('-nic-' in fname):
             fns[node] = fname
-        elif ('-mem-' in fname or '-disk-' in fname or '-meta-' in fname):
-            continue
         else:
-            assert(False)
+            continue
 
-    return {node:readFlows(fns[node]) for node in fns.keys()}
+    return {node: readFlows(fns[node]) for node in fns.keys()}
 
 
 def mapNicHostnameToNodes(nodes):
@@ -33,7 +31,7 @@ def mapNicHostnameToNodes(nodes):
     stringToNodeMap = {}
     for n in nodes.keys():
         intersect = reduce(lambda s1, s2: s1 & s2, (set(map(strip_port, (f['src'], f['dst']))) for f in nodes[n]))
-        pdb.set_trace()
+#        pdb.set_trace()
         if (len(intersect) != 1):
             print intersect
             assert(False)
@@ -42,29 +40,33 @@ def mapNicHostnameToNodes(nodes):
 
 
 def makeFlows(nodes):
-    mapping = mapNicHostnameToNodes(nodes)
+    # mapping = mapNicHostnameToNodes(nodes)
     random.seed(0)
-    hosts = random.sample(xrange(144), len(nodes))
+    # hosts = random.sample(xrange(144), len(nodes))
 
     earliestTime = min(f['time'] for f in sum(nodes.values(), []))
-    return sorted(sum((
-        [{
-        'time': 1e6*(f['time'] - earliestTime),
-        'src': f['src'], #hosts[int(mapping[f['src']])],
-        'dst': f['dst'], #hosts[int(mapping[f['dst']])],
-        'size': f['size']
-        } for f in nodes[n]]
-        for n in nodes), []), key=lambda f: f['time'])
+    return sorted(sum(([{
+                      'time': f['time'] - earliestTime,
+                      'src': f['src'],  # hosts[int(mapping[f['src']])],
+                      'dst': f['dst'],  # hosts[int(mapping[f['dst']])],
+                      'size': f['size']
+                      } for f in nodes[n]]
+                  for n in nodes), []), key=lambda f: f['time'])
+
+
+def run(outDir, traces):
+    outfname = outDir + 'nic_flows.txt'
+    nodes = readFiles(traces)
+    flows = makeFlows(nodes)
+    fid = 0
+    with open(outfname, 'w') as of:
+        for f in flows:
+            of.write("{0} {1} {2} {3} {4} nic 0-0\n".format(fid, f['time'], f['src'], f['dst'], f['size']))
+            fid += 1
+
 
 if __name__ == '__main__':
     if (len(sys.argv) < 2):
         print 'Usage: python makeFlowTrace.py <outfile> <IO traces...>'
         sys.exit(1)
-    outfname = sys.argv[1]
-    nodes = readFiles(sys.argv[2:])
-    flows = makeFlows(nodes)
-    fid = 0
-    with open(outfname, 'w') as of:
-        for f in flows:
-            of.write("{0} {1} {2} {3} {4} nic 0-0\n".format(fid, "%d" % f['time'], f['src'], f['dst'], f['size']))
-            fid += 1
+    run(sys.argv[1], sys.argv[2:])

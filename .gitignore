@@ -2,3 +2,4 @@ traces/
 *.txt
 *.hi
 *.o
+*.pyc
