@@ -69,10 +69,10 @@ def flowSizes(flows, prefix=None):
     plotSizeCDF(allfs, 'All Flows', 'allflowsizes', logx=True)
 
     mems = [f['size'] for f in flows if 'mem' in f['type']]
-    plotSizeCDF(mems, 'Remote Memory Flows', 'memflowsizes')
+    plotSizeCDF(mems, 'Remote Memory Flows', 'memflowsizes', logx=True)
 
     disk = [f['size'] for f in flows if 'disk' in f['type']]
-    plotSizeCDF(disk, 'Disk Flows', 'diskflowsizes')
+    plotSizeCDF(disk, 'Disk Flows', 'diskflowsizes', logx=True)
 
 
 def sdAnalysis(flows):
@@ -127,6 +127,7 @@ def sourceInterarrival(flows, prefix=None):
     plt.title('Histogram of Interarrival Times')
     plt.xlabel('Interarrival Time (us)')
     plt.ylabel('Count')
+    plt.ylim(0.1, 1e3)
     for s in srcs:
         inters = list(interarrivals(f['time'] for f in flows if f['src'] == s))
         bin_vals, bin_edges, _ = plt.hist(inters, bins=np.logspace(-1, 6), log=True)
