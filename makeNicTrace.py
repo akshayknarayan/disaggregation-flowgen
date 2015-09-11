@@ -18,37 +18,29 @@ def readFiles(fnames):
         # pdb.set_trace()
         if ('-nic-' in fname):
             fns[node] = fname
+        elif 'addr_mapping.txt' == fname:
+            fns['nicmap'] = fname
         else:
             continue
 
-    return {node: readFlows(fns[node]) for node in fns.keys()}
+    return {node: readFlows(fns[node]) for node in fns.keys()}, fns['nicmap']
 
 
-def mapNicHostnameToNodes(nodes):
-    def strip_port(hostname):
-        return hostname.split('.')[0]
-
-    stringToNodeMap = {}
-    for n in nodes.keys():
-        intersect = reduce(lambda s1, s2: s1 & s2, (set(map(strip_port, (f['src'], f['dst']))) for f in nodes[n]))
-#        pdb.set_trace()
-        if (len(intersect) != 1):
-            print intersect
-            assert(False)
-        stringToNodeMap[intersect.pop()] = n
-    return stringToNodeMap
+def readNicMap(fname):
+    with open(fname) as f:
+        return {sp[-1]: int(sp[0]) for sp in (l.split() for l in f.readlines())}
 
 
-def makeFlows(nodes):
-    # mapping = mapNicHostnameToNodes(nodes)
+def makeFlows(nodes, mapfn):
+    mapping = readNicMap(mapfn)
     random.seed(0)
     # hosts = random.sample(xrange(144), len(nodes))
 
     earliestTime = min(f['time'] for f in sum(nodes.values(), []))
     return sorted(sum(([{
                       'time': f['time'] - earliestTime,
-                      'src': f['src'],  # hosts[int(mapping[f['src']])],
-                      'dst': f['dst'],  # hosts[int(mapping[f['dst']])],
+                      'src': int(mapping[f['src']]),
+                      'dst': int(mapping[f['dst']]),
                       'size': f['size']
                       } for f in nodes[n]]
                   for n in nodes), []), key=lambda f: f['time'])
@@ -56,8 +48,8 @@ def makeFlows(nodes):
 
 def run(outDir, traces):
     outfname = outDir + 'nic_flows.txt'
-    nodes = readFiles(traces)
-    flows = makeFlows(nodes)
+    nodes, nicmapfn = readFiles(traces)
+    flows = makeFlows(nodes, nicmapfn)
     fid = 0
     with open(outfname, 'w') as of:
         for f in flows:

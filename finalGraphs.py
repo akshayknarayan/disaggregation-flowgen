@@ -9,6 +9,7 @@ matplotlib.use('Agg')
 from matplotlib import pyplot as plt
 
 from readFlowTrace import readFlows, cdf, interarrivals
+import threading
 
 import pdb
 
@@ -235,19 +236,25 @@ def graph7(pdis, dis):
 
 
 def collectAllFlows():
-    apps = ['graphlab', 'wordcount']  # , 'memcached', 'terasort', 'wordcount', 'wordcount_hadoop']  # "don't show anything from storm" - peter
+    apps = ['graphlab', 'memcached', 'terasort', 'wordcount', 'wordcount-hadoop']  # "don't show anything from storm" - peter
     apps = [(s, 'results/{}'.format(s)) for s in apps]
     pdis_file = '{}/nic_flows.txt'
     dis_file = '{}/res-based_timeonly_flows.txt'
+
     pdis = {}
     dis = {}
-    for a, a_dir in apps:
+
+    def read(a, a_dir):
         pdis[a] = readFlows(pdis_file.format(a_dir))
         dis[a] = readFlows(dis_file.format(a_dir))
+
+    threads = [threading.Thread(target=read, args=a) for a in apps]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
     return pdis, dis
 
 if __name__ == '__main__':
     pdis, dis = collectAllFlows()
     assert(len(pdis) == len(dis))
-    fns = [graph4] # [graph1, graph2, graph3, graph4, graph5, graph6, graph7]
+    fns = [graph1, graph2, graph3, graph4, graph5, graph6, graph7]
     map(lambda x: x(pdis, dis), fns)

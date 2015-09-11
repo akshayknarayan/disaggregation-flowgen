@@ -58,23 +58,8 @@ def readMemoryTrace(filename, node):
     '''
     all memory accesses in a given trace are between 2 given nodes.
     '''
-    def readMemoryTrace_gen(lines):
-        curr = None
-        for line in lines:
-            memFlow = readMemoryLine(line, node)
-            if (curr is None):
-                curr = memFlow
-                continue
-            elif (memFlow['batch_seq_no'] == 0):
-                yield curr
-                curr = memFlow
-            else:
-                curr['length'] += memFlow['length']
-        yield curr
-
     with open(filename, 'r') as trace:
-        # return [readMemoryLine(line, node) for line in trace]
-        return list(readMemoryTrace_gen(trace))
+        return [readMemoryLine(line, node) for line in trace]
 
 
 def readDiskLine(line, time_offset, node):
@@ -108,6 +93,19 @@ def readDiskTrace(diskFilename, tsFilename, node):
     return list(itertools.ifilter((lambda x: x is not None), (readDiskLine(line, offset, node) for line in out)))
 
 
+def readNicFlows(fname, node):
+    def stripPort(name):
+        return '.'.join(name.split('.')[:-1])
+
+    with open(fname) as f:
+        return map(lambda l: {'node': node, 'start_time': float(l[0]), 'end_time': float(l[1]), 'src': stripPort(l[2]), 'dst': stripPort(l[3]), 'size': int(l[4])}, (l.split() for l in f.readlines()))
+
+
+def readNicMap(fname):
+    with open(fname) as f:
+        return {sp[-1]: int(sp[0]) for sp in (l.split() for l in f.readlines())}
+
+
 def readFiles(fileNames):
     fns = {}
     for name in fileNames:
@@ -126,22 +124,26 @@ def readFiles(fileNames):
             else:
                 fns[node]['disk'] = name
         elif '-meta-' in fname:
-            fns[node]['ts'] = name
+            fns[node]['meta'] = name
+        elif 'addr_mapping.txt' == fname:
+            fns['nicmap'] = name
         elif '-nic-' in fname:
-            continue  # nic trace should be separate.
+            fns[node]['nic'] = name
         else:
             assert(False)
 
     def readNode(node, n, outNodes, lock):
         mem = readMemoryTrace(n['mem'], node)
-        disk = readDiskTrace(n['disk'], n['ts'], node)
+        disk = readDiskTrace(n['disk'], n['meta'], node)
+        nic = readNicFlows(n['nic'], node)
         lock.acquire()
         print node
-        nodes[node] = {'mem': mem, 'disk': disk, 'lock': threading.Lock()}
+        nodes[node] = {'mem': mem, 'disk': disk, 'nic': nic, 'lock': threading.Lock()}
         lock.release()
         return
 
     nodes = {}
+    nodes['nicmap'] = readNicMap(fns['nicmap'])
     lock = threading.Lock()
     threads = [threading.Thread(target=readNode, args=(n, fns[node], nodes, lock)) for n in fns.keys()]
     [t.start() for t in threads]
@@ -189,6 +191,7 @@ def makeFlows(nodes, data, opts):
         assert(False)
 
     earliestTime, duration, memRange, memTotalVolume, memBandiwdthDemandPerUnit, diskRange, diskTotalVolume, diskBandwidthDemandPerUnit = data
+    nicmap = nodes['nicmap']
 
     flowsByNode = {}
 
@@ -199,11 +202,11 @@ def makeFlows(nodes, data, opts):
         mems = nodes[n]['mem']
         memFlows = []
         if (len(mems) > 0):
-            memAddrs = [m['addr'] - ((23e9/4096) * m['node']) for m in mems]
+            memAddrs = [m['addr'] for m in mems]
             localRange = max(memAddrs) - min(memAddrs)
             for mem in mems:
                 # local_addr = m['addr'] - (23e9/4096) * mem['node']
-                h = int((m['addr'] / localRange) * numNodes)
+                h = int((mem['addr'] / localRange) * numNodes)
                 if (opts[0] == ARCH_RES_BASED):
                     h += numNodes  # there are as many memory nodes as CPU nodes.
 
@@ -230,30 +233,42 @@ def makeFlows(nodes, data, opts):
                         'addr': mem['addr']
                     }
                 )
-            flowsByNode[n] += collapseFlows(memFlows, opts[1])
+            flowsByNode[n] += memFlows
             del memAddrs
             del memFlows
 
         disks = nodes[n]['disk']
-        diskFlows = []
-        if (len(disks) > 0):
-            diskAddrs = [d['addr'] - (77e9/4096) * d['node'] for d in disks]
-            localRange = max(diskAddrs) - min(diskAddrs)
-            for disk in disks:
-                #  local_addr = d['addr'] - (77e9/4096) * d['node']
-                if (opts[0] == ARCH_RES_BASED):
-                    h = int((d['addr'] / localRange) * 3) + (2 * numNodes)  # there are 3 disk nodes.
-                else:
-                    h = int((d['addr'] / localRange) * numNodes)
+        nicFlows = [{'start_time': f['start_time'], 'end_time': f['end_time'], 'size': f['size'], 'src': nicmap[f['src']], 'dst': nicmap[f['dst']]} for f in nodes[n]['nic'] if nicmap[f['src']] != -1 and nicmap[f['dst']] != -1]
+        nicFlows = filter(lambda f: f['dst'] == n, nicFlows)
+        nicFlows.sort(key=lambda f: -1 * f['start_time'])
 
-                if (disk['rw'] == 'r'):
-                    src = hosts[h if h < len(hosts) else (len(hosts) - 1)]
-                    dst = hosts[n]
-                    typ = "diskRead"
+        disks.sort(key=lambda f: f['time'])
+        diskFlows = []
+
+        if (len(disks) > 0):
+            diskAddrs = [d['addr'] for d in disks]
+            localRange = max(diskAddrs) - min(diskAddrs)
+            currNicFlow = nicFlows.pop()
+            for disk in disks:
+                if (opts[0] == ARCH_RES_BASED):
+                    h = int((disk['addr'] / localRange) * 3) + (2 * numNodes)  # there are 3 disk nodes.
                 else:
+                    h = int((disk['addr'] / localRange) * numNodes)
+
+                if (disk['rw'] == 'w'):
                     src = hosts[n]
                     dst = hosts[h if h < len(hosts) else (len(hosts) - 1)]
                     typ = "diskWr"
+                else:
+                    time = disk['time']
+                    if (not (currNicFlow['size'] > disk['size'] and time > currNicFlow['start_time'] and time < currNicFlow['end_time'])):
+                        currNicFlow = nicFlows.pop()
+                    currNicFlow['size'] -= disk['size']
+
+                    src = hosts[h if h < len(hosts) else (len(hosts) - 1)]
+                    # assign this disk flow to the source of the nic flow
+                    dst = hosts[currNicFlow['src']]
+                    typ = "diskRead"
                 if (src == dst):
                     assert (opts[0] == ARCH_RACK_SCALE), "disk {} {} {} {}".format(opts[0], h, n, numNodes)
                     continue
