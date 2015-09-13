@@ -1,7 +1,5 @@
 #!/bin/bash
 
-python makeTraces.py
-
 cd results
 for dir in `ls`; do
     if [ "$dir" == "Readme.md" ]; then continue; fi

@@ -201,6 +201,7 @@ def makeFlows(nodes, data, opts):
     def processNode(n, nodes):
         assert('nicmap' not in nodes.keys())
         nodes[n]['lock'].acquire()
+        flowsByNode[n] = {}
         flowsByNode[n]['mem'] = []
         flowsByNode[n]['disk'] = []
 
@@ -244,7 +245,7 @@ def makeFlows(nodes, data, opts):
 
         def processDiskFlows():
             disks = nodes[n]['disk']
-            nicFlows = [{'start_time': f['start_time'], 'end_time': f['end_time'], 'size': f['size'], 'src': nicmap[f['src']], 'dst': nicmap[f['dst']]} for f in nodes[n]['nic'] if nicmap[f['src']] != -1 and nicmap[f['dst']] != -1]
+            nicFlows = [{'start_time': f['start_time'], 'end_time': f['end_time'], 'size': f['size'], 'src': nicmap[f['src']], 'dst': nicmap[f['dst']]} for f in nodes[n]['nic'] if (f['src'] in nicmap and f['dst'] in nicmap) and (nicmap[f['src']] != -1 and nicmap[f['dst']] != -1)]
             nicFlows = filter(lambda f: f['dst'] == n, nicFlows)
             if (len(nicFlows) == 0):
                 pdb.set_trace()
@@ -429,7 +430,7 @@ def plotAddressAccessOverTime(flows, prefix=None):
 
 
 def writeFlows(flows, outDir, arrangement, opt):
-    print 'writing:', "{0}{1}_{2}_flows.txt".format(outDir, arrangement, opt), ': ', len(flows), ' flows'
+    print 'writing:', "{0}{1}_{2}_flows.txt".format(outDir, arrangement, opt)
     fid = 0
     with open("{0}{1}_{2}_flows.txt".format(outDir, arrangement, opt), 'w') as of:
         for f in flows:
