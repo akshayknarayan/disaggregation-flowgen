@@ -7,23 +7,27 @@ import random
 
 
 def readFlows(fname):
+    def stripPort(name):
+        return '.'.join(name.split('.')[:-1])
+
     with open(fname) as f:
-        return map(lambda l: {'time': float(l[0]), 'src': l[1].split('.')[0], 'dst': l[2][:-1].split('.')[0], 'size': int(l[3])}, (l.split() for l in f.readlines()))
+        return map(lambda l: {'time': float(l[0]), 'src': stripPort(l[2]), 'dst': stripPort(l[3]), 'size': int(l[4])}, (l.split() for l in f.readlines()))
 
 
 def readFiles(fnames):
     fns = {}
     for fname in fnames:
+        if 'addr_mapping.txt' in fname:
+            fns['nicmap'] = fname
+            continue
         node = fname.split('/')[-1].split('-')[0]
         # pdb.set_trace()
         if ('-nic-' in fname):
             fns[node] = fname
-        elif 'addr_mapping.txt' == fname:
-            fns['nicmap'] = fname
         else:
             continue
 
-    return {node: readFlows(fns[node]) for node in fns.keys()}, fns['nicmap']
+    return {node: readFlows(fns[node]) for node in fns.keys() if node != 'nicmap'}, fns['nicmap']
 
 
 def readNicMap(fname):
@@ -33,6 +37,7 @@ def readNicMap(fname):
 
 def makeFlows(nodes, mapfn):
     mapping = readNicMap(mapfn)
+    print mapping
     random.seed(0)
     # hosts = random.sample(xrange(144), len(nodes))
 
@@ -42,7 +47,7 @@ def makeFlows(nodes, mapfn):
                       'src': int(mapping[f['src']]),
                       'dst': int(mapping[f['dst']]),
                       'size': f['size']
-                      } for f in nodes[n]]
+                      } for f in nodes[n] if (f['src'] in mapping and f['dst'] in mapping)]
                   for n in nodes), []), key=lambda f: f['time'])
 
 

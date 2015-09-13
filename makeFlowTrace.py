@@ -12,7 +12,7 @@ import random
 
 import threading
 
-# import pdb
+import pdb
 
 ARCH_RACK_SCALE = 'rack-scale'
 ARCH_RES_BASED = 'res-based'
@@ -103,15 +103,19 @@ def readNicFlows(fname, node):
 
 def readNicMap(fname):
     with open(fname) as f:
-        return {sp[-1]: int(sp[0]) for sp in (l.split() for l in f.readlines())}
+        nm = {sp[-1]: int(sp[0]) for sp in (l.split() for l in f.readlines())}
+        print nm
+        return nm
 
 
 def readFiles(fileNames):
     fns = {}
     for name in fileNames:
-        print name
         fname = name.split('/')[-1]
         if fname == 'traceinfo.txt':
+            continue
+        if 'addr_mapping.txt' == fname:
+            fns['nicmap'] = name
             continue
         node = int(fname.split('-')[0])
         if node not in fns:
@@ -125,19 +129,16 @@ def readFiles(fileNames):
                 fns[node]['disk'] = name
         elif '-meta-' in fname:
             fns[node]['meta'] = name
-        elif 'addr_mapping.txt' == fname:
-            fns['nicmap'] = name
         elif '-nic-' in fname:
             fns[node]['nic'] = name
         else:
             assert(False)
 
-    def readNode(node, n, outNodes, lock):
+    def readNode(node, n, lock):
         mem = readMemoryTrace(n['mem'], node)
         disk = readDiskTrace(n['disk'], n['meta'], node)
         nic = readNicFlows(n['nic'], node)
         lock.acquire()
-        print node
         nodes[node] = {'mem': mem, 'disk': disk, 'nic': nic, 'lock': threading.Lock()}
         lock.release()
         return
@@ -145,7 +146,7 @@ def readFiles(fileNames):
     nodes = {}
     nodes['nicmap'] = readNicMap(fns['nicmap'])
     lock = threading.Lock()
-    threads = [threading.Thread(target=readNode, args=(n, fns[node], nodes, lock)) for n in fns.keys()]
+    threads = [threading.Thread(target=readNode, args=(n, fns[node], lock)) for n in fns.keys() if n != 'nicmap']
     [t.start() for t in threads]
     [t.join() for t in threads]
 
@@ -154,20 +155,21 @@ def readFiles(fileNames):
 
 
 def getTrafficData(nodes):
+    nodes_keys = filter(lambda f: f != 'nicmap', nodes.keys())
     times = [f['time'] for f in itertools.chain(
-        itertools.chain.from_iterable(nodes[n]['disk'] for n in nodes.keys()),
-        itertools.chain.from_iterable(nodes[n]['mem'] for n in nodes.keys())
+        itertools.chain.from_iterable(nodes[n]['disk'] for n in nodes_keys),
+        itertools.chain.from_iterable(nodes[n]['mem'] for n in nodes_keys)
     )]
     earliestTime = min(times)
     duration = max(times) - earliestTime
 
-    memAddrs = [m['addr'] for m in itertools.chain.from_iterable(nodes[n]['mem'] for n in nodes.keys())]
+    memAddrs = [m['addr'] for m in itertools.chain.from_iterable(nodes[n]['mem'] for n in nodes_keys)]
     memRange = max(memAddrs) - min(memAddrs)
-    diskAddrs = [d['addr'] for d in itertools.chain.from_iterable(nodes[n]['disk'] for n in nodes.keys())]
+    diskAddrs = [d['addr'] for d in itertools.chain.from_iterable(nodes[n]['disk'] for n in nodes_keys)]
     diskRange = max(diskAddrs) - min(diskAddrs)
 
-    memTotalVolume = sum(m['length'] for m in itertools.chain.from_iterable(nodes[n]['mem'] for n in nodes.keys()))
-    diskTotalVolume = sum(d['length'] for d in itertools.chain.from_iterable(nodes[n]['disk'] for n in nodes.keys()))
+    memTotalVolume = sum(m['length'] for m in itertools.chain.from_iterable(nodes[n]['mem'] for n in nodes_keys))
+    diskTotalVolume = sum(d['length'] for d in itertools.chain.from_iterable(nodes[n]['disk'] for n in nodes_keys))
 
     memBandiwdthDemandPerUnit, diskBandwidthDemandPerUnit = ((memTotalVolume * 8) / duration) / (memRange * 4096 / 1e9), ((diskTotalVolume * 8) / duration) / (diskRange * 4096 / 1e9)
 
@@ -192,10 +194,12 @@ def makeFlows(nodes, data, opts):
 
     earliestTime, duration, memRange, memTotalVolume, memBandiwdthDemandPerUnit, diskRange, diskTotalVolume, diskBandwidthDemandPerUnit = data
     nicmap = nodes['nicmap']
+    del nodes['nicmap']
 
     flowsByNode = {}
 
     def processNode(n, nodes):
+        assert('nicmap' not in nodes.keys())
         nodes[n]['lock'].acquire()
         flowsByNode[n] = []
 
@@ -205,7 +209,6 @@ def makeFlows(nodes, data, opts):
             memAddrs = [m['addr'] for m in mems]
             localRange = max(memAddrs) - min(memAddrs)
             for mem in mems:
-                # local_addr = m['addr'] - (23e9/4096) * mem['node']
                 h = int((mem['addr'] / localRange) * numNodes)
                 if (opts[0] == ARCH_RES_BASED):
                     h += numNodes  # there are as many memory nodes as CPU nodes.
@@ -240,6 +243,8 @@ def makeFlows(nodes, data, opts):
         disks = nodes[n]['disk']
         nicFlows = [{'start_time': f['start_time'], 'end_time': f['end_time'], 'size': f['size'], 'src': nicmap[f['src']], 'dst': nicmap[f['dst']]} for f in nodes[n]['nic'] if nicmap[f['src']] != -1 and nicmap[f['dst']] != -1]
         nicFlows = filter(lambda f: f['dst'] == n, nicFlows)
+        if (len(nicFlows) == 0):
+            pdb.set_trace()
         nicFlows.sort(key=lambda f: -1 * f['start_time'])
 
         disks.sort(key=lambda f: f['time'])
@@ -261,13 +266,21 @@ def makeFlows(nodes, data, opts):
                     typ = "diskWr"
                 else:
                     time = disk['time']
-                    if (not (currNicFlow['size'] > disk['size'] and time > currNicFlow['start_time'] and time < currNicFlow['end_time'])):
-                        currNicFlow = nicFlows.pop()
-                    currNicFlow['size'] -= disk['size']
+                    if (currNicFlow is not None and 'size' not in currNicFlow.keys()):
+                        pdb.set_trace()
+                    while (currNicFlow is not None and not (currNicFlow['size'] > disk['length'] and time > currNicFlow['start_time'] and time < currNicFlow['end_time'])):
+                        currNicFlow = nicFlows.pop() if len(nicFlows) > 0 else None
 
-                    src = hosts[h if h < len(hosts) else (len(hosts) - 1)]
-                    # assign this disk flow to the source of the nic flow
-                    dst = hosts[currNicFlow['src']]
+                    if (currNicFlow is not None):
+                        currNicFlow['size'] -= disk['length']
+
+                        src = hosts[h if h < len(hosts) else (len(hosts) - 1)]
+                        # assign this disk flow to the source of the nic flow
+                        dst = hosts[currNicFlow['src']]
+                    else:
+                        src = hosts[h if h < len(hosts) else (len(hosts) - 1)]
+                        dst = hosts[n]
+
                     typ = "diskRead"
                 if (src == dst):
                     assert (opts[0] == ARCH_RACK_SCALE), "disk {} {} {} {}".format(opts[0], h, n, numNodes)
@@ -292,9 +305,14 @@ def makeFlows(nodes, data, opts):
         nodes[n]['lock'].release()
         del nodes[n]
 
-    threads = [threading.Thread(target=processNode, args=(n, nodes)) for n in nodes.keys()]
+    threads = [threading.Thread(target=processNode, args=(n, nodes)) for n in nodes.keys() if n != 'nicmap']
     [t.start() for t in threads]
     [t.join() for t in threads]
+
+    # for n in nodes.keys():
+    #    if (n == 'nicmap'):
+    #        continue
+    #    processNode(n, nodes)
 
     flows = sum(flowsByNode.values(), [])
     flows.sort(key=lambda f: f['time'])
@@ -382,6 +400,7 @@ def collapseFlows(flows, opts):
     collapsed.sort(key=lambda f: f['time'])
     return collapsed
 
+
 '''
 def plotAddressAccessOverTime(flows, prefix=None):
     memFlows = [f for f in flows if 'mem' in f['type']]
@@ -400,6 +419,7 @@ def plotAddressAccessOverTime(flows, prefix=None):
 
 
 def writeFlows(flows, outDir, arrangement, opt):
+    print 'writing:', "{0}{1}_{2}_flows.txt".format(outDir, arrangement, opt), ': ', len(flows), ' flows'
     fid = 0
     with open("{0}{1}_{2}_flows.txt".format(outDir, arrangement, opt), 'w') as of:
         for f in flows:
@@ -416,9 +436,7 @@ def run(outDir, traces):
         writeFlows(flows, outDir, arrangement, COMB_NONE)
 
         for opt in [COMB_TIMEONLY]:
-            print "{0}{1}_{2}_flows.txt".format(outDir, arrangement, opt)
             col_flows = collapseFlows(flows, opt)
-            print len(col_flows)
             #  plotAddressAccessOverTime(flows)
             writeFlows(col_flows, outDir, arrangement, opt)
 

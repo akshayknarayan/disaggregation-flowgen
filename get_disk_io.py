@@ -1,10 +1,7 @@
 import sys
 import re
 
-while True:
-    line = sys.stdin.readline()
-    if line == "":
-        break
+for line in sys.stdin:
     lineArr = re.sub(' +', ' ', line.strip()).split(' ')
     if "," in lineArr[0]:
         major = int(lineArr[0].split(",")[0])
