@@ -201,107 +201,114 @@ def makeFlows(nodes, data, opts):
     def processNode(n, nodes):
         assert('nicmap' not in nodes.keys())
         nodes[n]['lock'].acquire()
-        flowsByNode[n] = []
+        flowsByNode[n]['mem'] = []
+        flowsByNode[n]['disk'] = []
 
-        mems = nodes[n]['mem']
-        memFlows = []
-        if (len(mems) > 0):
-            memAddrs = [m['addr'] for m in mems]
-            localRange = max(memAddrs) - min(memAddrs)
-            for mem in mems:
-                h = int((mem['addr'] / localRange) * numNodes)
-                if (opts[0] == ARCH_RES_BASED):
-                    h += numNodes  # there are as many memory nodes as CPU nodes.
+        def processMemFlows():
+            mems = nodes[n]['mem']
+            memFlows = []
+            if (len(mems) > 0):
+                memAddrs = [m['addr'] for m in mems]
+                localRange = max(memAddrs) - min(memAddrs)
+                for mem in mems:
+                    h = int((mem['addr'] / localRange) * numNodes)
+                    if (opts[0] == ARCH_RES_BASED):
+                        h += numNodes  # there are as many memory nodes as CPU nodes.
 
-                if (mem['rw'] == 'r'):
-                    src = hosts[h if h < len(hosts) else (len(hosts) - 1)]
-                    dst = hosts[n]
-                    typ = "memRead"
-                else:
-                    src = hosts[n]
-                    dst = hosts[h if h < len(hosts) else (len(hosts) - 1)]
-                    typ = "memWr"
-                if (src == dst):
-                    assert (opts[0] == ARCH_RACK_SCALE), "mem {} {} {} {} {} {}".format(opts[0], h, n, numNodes, src, dst)
-                    continue
-
-                memFlows.append(
-                    {
-                        'time': mem['time'] - earliestTime,
-                        'src': src,
-                        'dst': dst,
-                        'size': mem['length'],
-                        'type': typ,
-                        'disp-addr': str(n) + '-' + str(mem['addr']),
-                        'addr': mem['addr']
-                    }
-                )
-            flowsByNode[n] += memFlows
-            del memAddrs
-            del memFlows
-
-        disks = nodes[n]['disk']
-        nicFlows = [{'start_time': f['start_time'], 'end_time': f['end_time'], 'size': f['size'], 'src': nicmap[f['src']], 'dst': nicmap[f['dst']]} for f in nodes[n]['nic'] if nicmap[f['src']] != -1 and nicmap[f['dst']] != -1]
-        nicFlows = filter(lambda f: f['dst'] == n, nicFlows)
-        if (len(nicFlows) == 0):
-            pdb.set_trace()
-        nicFlows.sort(key=lambda f: -1 * f['start_time'])
-
-        disks.sort(key=lambda f: f['time'])
-        diskFlows = []
-
-        if (len(disks) > 0):
-            diskAddrs = [d['addr'] for d in disks]
-            localRange = max(diskAddrs) - min(diskAddrs)
-            currNicFlow = nicFlows.pop()
-            for disk in disks:
-                if (opts[0] == ARCH_RES_BASED):
-                    h = int((disk['addr'] / localRange) * 3) + (2 * numNodes)  # there are 3 disk nodes.
-                else:
-                    h = int((disk['addr'] / localRange) * numNodes)
-
-                if (disk['rw'] == 'w'):
-                    src = hosts[n]
-                    dst = hosts[h if h < len(hosts) else (len(hosts) - 1)]
-                    typ = "diskWr"
-                else:
-                    time = disk['time']
-                    if (currNicFlow is not None and 'size' not in currNicFlow.keys()):
-                        pdb.set_trace()
-                    while (currNicFlow is not None and not (currNicFlow['size'] > disk['length'] and time > currNicFlow['start_time'] and time < currNicFlow['end_time'])):
-                        currNicFlow = nicFlows.pop() if len(nicFlows) > 0 else None
-
-                    if (currNicFlow is not None):
-                        currNicFlow['size'] -= disk['length']
-
-                        src = hosts[h if h < len(hosts) else (len(hosts) - 1)]
-                        # assign this disk flow to the source of the nic flow
-                        dst = hosts[currNicFlow['src']]
-                    else:
+                    if (mem['rw'] == 'r'):
                         src = hosts[h if h < len(hosts) else (len(hosts) - 1)]
                         dst = hosts[n]
+                        typ = "memRead"
+                    else:
+                        src = hosts[n]
+                        dst = hosts[h if h < len(hosts) else (len(hosts) - 1)]
+                        typ = "memWr"
+                    if (src == dst):
+                        assert (opts[0] == ARCH_RACK_SCALE), "mem {} {} {} {} {} {}".format(opts[0], h, n, numNodes, src, dst)
+                        continue
 
-                    typ = "diskRead"
-                if (src == dst):
-                    assert (opts[0] == ARCH_RACK_SCALE), "disk {} {} {} {}".format(opts[0], h, n, numNodes)
-                    continue
+                    memFlows.append(
+                        {
+                            'time': mem['time'] - earliestTime,
+                            'src': src,
+                            'dst': dst,
+                            'size': mem['length'],
+                            'type': typ,
+                            'disp-addr': str(n) + '-' + str(mem['addr']),
+                            'addr': mem['addr']
+                        }
+                    )
+                flowsByNode[n]['disk'] += memFlows
+                del memAddrs
+                del memFlows
 
-                diskFlows.append(
-                    {
-                        'time': disk['time'] - earliestTime,
-                        'src': src,
-                        'dst': dst,
-                        'size': disk['length'],
-                        'type': typ,
-                        'disp-addr': str(n) + '-' + str(disk['addr']),
-                        'addr': disk['addr']
-                    }
-                )
-            flowsByNode[n] += collapseFlows(diskFlows, opts[1])
-            del diskAddrs
-            del diskFlows
+        def processDiskFlows():
+            disks = nodes[n]['disk']
+            nicFlows = [{'start_time': f['start_time'], 'end_time': f['end_time'], 'size': f['size'], 'src': nicmap[f['src']], 'dst': nicmap[f['dst']]} for f in nodes[n]['nic'] if nicmap[f['src']] != -1 and nicmap[f['dst']] != -1]
+            nicFlows = filter(lambda f: f['dst'] == n, nicFlows)
+            if (len(nicFlows) == 0):
+                pdb.set_trace()
+            nicFlows.sort(key=lambda f: -1 * f['start_time'])
 
-        print n, len(flowsByNode[n])
+            disks.sort(key=lambda f: f['time'])
+            diskFlows = []
+
+            if (len(disks) > 0):
+                diskAddrs = [d['addr'] for d in disks]
+                localRange = max(diskAddrs) - min(diskAddrs)
+                currNicFlow = nicFlows.pop()
+                for disk in disks:
+                    if (opts[0] == ARCH_RES_BASED):
+                        h = int((disk['addr'] / localRange) * 3) + (2 * numNodes)  # there are 3 disk nodes.
+                    else:
+                        h = int((disk['addr'] / localRange) * numNodes)
+
+                    if (disk['rw'] == 'w'):
+                        src = hosts[n]
+                        dst = hosts[h if h < len(hosts) else (len(hosts) - 1)]
+                        typ = "diskWr"
+                    else:
+                        time = disk['time']
+                        if (currNicFlow is not None and 'size' not in currNicFlow.keys()):
+                            pdb.set_trace()
+                        while (currNicFlow is not None and not (currNicFlow['size'] > disk['length'] and time > currNicFlow['start_time'] and time < currNicFlow['end_time'])):
+                            currNicFlow = nicFlows.pop() if len(nicFlows) > 0 else None
+
+                        if (currNicFlow is not None):
+                            currNicFlow['size'] -= disk['length']
+
+                            src = hosts[h if h < len(hosts) else (len(hosts) - 1)]
+                            # assign this disk flow to the source of the nic flow
+                            dst = hosts[currNicFlow['src']]
+                        else:
+                            src = hosts[h if h < len(hosts) else (len(hosts) - 1)]
+                            dst = hosts[n]
+
+                        typ = "diskRead"
+                    if (src == dst):
+                        assert (opts[0] == ARCH_RACK_SCALE), "disk {} {} {} {}".format(opts[0], h, n, numNodes)
+                        continue
+
+                    diskFlows.append(
+                        {
+                            'time': disk['time'] - earliestTime,
+                            'src': src,
+                            'dst': dst,
+                            'size': disk['length'],
+                            'type': typ,
+                            'disp-addr': str(n) + '-' + str(disk['addr']),
+                            'addr': disk['addr']
+                        }
+                    )
+                flowsByNode[n]['disk'] += diskFlows
+                del diskAddrs
+                del diskFlows
+
+        processThreads = [threading.Thread(target=processMemFlows), threading.Thread(target=processDiskFlows)]
+        [t.start() for t in processThreads]
+        [t.join() for t in processThreads]
+
+        print n, len(flowsByNode[n]['mem']) + len(flowsByNode[n]['disk'])
         nodes[n]['lock'].release()
         del nodes[n]
 
@@ -314,9 +321,12 @@ def makeFlows(nodes, data, opts):
     #        continue
     #    processNode(n, nodes)
 
-    flows = sum(flowsByNode.values(), [])
-    flows.sort(key=lambda f: f['time'])
-    return flows
+    memFlows = sum((v['mem'] for v in flowsByNode.values()), [])
+    diskFlows = sum((v['disk'] for v in flowsByNode.values()), [])
+
+    memFlows.sort(key=lambda f: f['time'])
+    diskFlows.sort(key=lambda f: f['time'])
+    return memFlows, diskFlows
 
 
 def collapseFlows(flows, opts):
@@ -427,18 +437,38 @@ def writeFlows(flows, outDir, arrangement, opt):
             fid += 1
 
 
+def mergeSortedLists(a, b):
+    i = 0
+    j = 0
+    while (i < len(a) and j < len(b)):
+        if (a[i]['time'] < b[j]['time']):
+            yield a[i]
+            i += 1
+        else:
+            yield b[j]
+            j += 1
+    if (i == len(a)):
+        while (j < len(b)):
+            yield b[j]
+            j += 1
+    else:
+        while (i < len(a)):
+            yield a[i]
+            i += 1
+
+
 def run(outDir, traces):
     nodes = readFiles(traces)
     data = getTrafficData(nodes)
     print data
     for arrangement in [ARCH_RES_BASED]:
-        flows = makeFlows(nodes, data, (arrangement, COMB_NONE))
-        writeFlows(flows, outDir, arrangement, COMB_NONE)
+        mem, disk = makeFlows(nodes, data, (arrangement, COMB_NONE))
+        writeFlows(mergeSortedLists(mem, disk), outDir, arrangement, COMB_NONE)
 
         for opt in [COMB_TIMEONLY]:
-            col_flows = collapseFlows(flows, opt)
-            #  plotAddressAccessOverTime(flows)
-            writeFlows(col_flows, outDir, arrangement, opt)
+            # only disk flows get combined.
+            disk_col_flows = collapseFlows(disk, opt)
+            writeFlows(mergeSortedLists(mem, disk_col_flows), outDir, arrangement, opt)
 
 
 if __name__ == '__main__':
