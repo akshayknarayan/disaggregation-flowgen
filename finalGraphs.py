@@ -16,17 +16,6 @@ import pdb
 # Graph function takes 2 dicts with structure keys = application name, value = list of flows
 
 
-def makeGradient(color, steps=10):
-    gradient = list(np.linspace(1.0, 0.5, num=steps))
-    if (color == 'blue'):
-        fn = lambda b: (0.0, 0.0, b)
-    elif (color == 'green'):
-        fn = lambda g: (0.0, g, 0.0)
-    else:
-        assert(False)
-    return map(fn, gradient)
-
-
 # Graph 1: Flow size distribution in \dis and \pdis. All applications go into one figure: multiple lines in the CDF, one for each application. The same thing for \pdis.
 def graph1(pdis, dis):
     def makeGraph(name, apps):
@@ -36,10 +25,11 @@ def graph1(pdis, dis):
         plt.xlim(1, 1e10)
         plt.ylabel('CDF')
         plt.xlabel('Flow Size, Bytes')
-        for app in apps:
+        sorted_apps = sorted(apps.keys())
+        for app in sorted_apps:
             x, y = cdf([f['size'] for f in apps[app]])
             plt.semilogx(x, y, label=app)
-        plt.legend()
+        plt.legend(loc='lower right')
         plt.savefig(name)
     makeGraph('graph1_sizedist_pdis.pdf', pdis)
     makeGraph('graph1_sizedist_dis.pdf', dis)
@@ -59,58 +49,27 @@ def graph2(pdis, dis):
     plt.xlabel('Application')
     plt.ylabel('Number of Flows')
     plt.ylim(1e2, 1e7)
-    plt.xticks(ind + width, tuple(dis.keys()))
+    plt.xticks(ind + width, tuple(keys_sorted))
     pdis_bar = plt.bar(ind, pdis_numflows, width, log=True, color='g')
     dis_bar = plt.bar(ind+width, dis_numflows, width, log=True, color='b')
-    plt.legend((pdis_bar[0], dis_bar[0]), ('Pre-Disaggregation', 'Disaggregated'))
+    plt.legend((pdis_bar[0], dis_bar[0]), ('Pre-Disaggregation', 'Disaggregated'), bbox_to_anchor=(0., 1.02, 1., .102), loc=3, ncol=2, mode="expand", borderaxespad=0.)
     plt.savefig('graph2_numflows.pdf')
     print 'graph2'
     return
 
 
 # Graph 3: #bytes in different flow bucket sizes for \dis and \pdis. One single stack-bar graph, two bars for each application, one stack for each bucket size --- one for #bytes in \dis and the other for #bytes in \pdis.
-def graph3_old(pdis, dis):
-    keys_sorted = sorted(pdis.keys())
-    largest_flow = max(max([max(f['size'] for f in pdis[k]) for k in keys_sorted]), max([max(f['size'] for f in dis[k]) for k in keys_sorted]))
-    buckets = np.logspace(2, np.floor(np.log10(largest_flow)), num=11)
-    bucketized_pdis = {k: np.histogram([f['size'] for f in pdis[k]], bins=buckets)[0] for k in keys_sorted}
-    bucketized_dis = {k: np.histogram([f['size'] for f in dis[k]], bins=buckets)[0] for k in keys_sorted}
-
-    plt.cla()
-    plt.clf()
-    ind = np.arange(len(pdis))
-    width = 0.35
-    plt.xlabel('Application')
-    plt.ylabel('Number of Flows')
-    plt.title('Number of Flows per Bin')
-    plt.xticks(ind + width, tuple(pdis.keys()))
-    bottoms_pdis = [1] * len(keys_sorted)
-    bottoms_dis = [1] * len(keys_sorted)
-    blues = makeGradient('blue', steps=10)
-    greens = makeGradient('green', steps=10)
-    for i in xrange(len(buckets) - 1):
-        vals_pdis = [bucketized_pdis[k][i] for k in keys_sorted]
-        vals_dis = [bucketized_dis[k][i] for k in keys_sorted]
-        plt.bar(ind, vals_pdis, width, bottom=bottoms_pdis, log=True, color=greens[i])
-        plt.bar(ind+width, vals_dis, width, bottom=bottoms_dis, log=True, color=blues[i])
-        bottoms_pdis = vals_pdis
-        bottoms_dis = vals_dis
-    plt.savefig('graph3_bucketedFlowSizes.pdf')
-    print 'graph3'
-    return
-
-
 def graph3(pdis, dis):
     def makeGraph(name, title, apps):
         keys_sorted = sorted(apps.keys())
-        largest_flow = max([max(f['size'] for f in apps[k]) for k in keys_sorted])
-        buckets = np.logspace(2, np.floor(np.log10(largest_flow)), num=6)
+        buckets = np.logspace(2, 8, num=7)
         bucketized = {k: np.histogram([f['size'] for f in apps[k]], bins=buckets)[0] for k in keys_sorted}
 
         plt.cla()
         plt.clf()
-        plt.xlabel('Bins')
+        plt.xlabel('Bins: Bytes')
         plt.ylabel('Number of Flows')
+        plt.ylim(1, 1e7)
         plt.title(title)
         ind = np.arange(len(buckets) - 1)
         plt.xticks(ind, buckets)
@@ -118,6 +77,10 @@ def graph3(pdis, dis):
         for k in keys_sorted:
             plt.semilogy(ind, bucketized[k], 'o-', label=k)
 
+        if ('_pdis' in name):
+            plt.legend(loc='upper left')
+        else:
+            plt.legend(loc='lower left')
         plt.savefig(name)
     makeGraph('graph3_sizebins_pdis.pdf', 'Pre-Disaggregation Binned Flow Sizes', pdis)
     makeGraph('graph3_sizebins_dis.pdf', 'Post-Disaggregation Binned Flow Sizes', dis)
@@ -141,9 +104,10 @@ def graph4(pdis, dis):
             flowsForSource = lambda s: sorted(filter(lambda f: f['src'] == s, apps[app]), key=lambda f: f['time'])
             perSourceIntersList = [list(interarrivals((f['time'] * 1e6) for f in flowsForSource(s))) for s in srcs]
             inters = sum(perSourceIntersList, [])
-            pdb.set_trace()
+            # pdb.set_trace()
             x, y = cdf(inters)
             plt.semilogx(x, y, label=app)
+        plt.legend(loc='lower right')
         plt.savefig(name)
     makeGraph('graph4_interdist_pdis.pdf', pdis)
     makeGraph('graph4_interdist_dis.pdf', dis)
@@ -154,19 +118,21 @@ def graph4(pdis, dis):
 # Graph 5: Traffic volume in \dis and \pdis. One single bar graph, two bars for each application --- one for volume in \dis and the other for volume in \pdis.
 def graph5(pdis, dis):
     keys_sorted = sorted(pdis.keys())
-    pdis_numflows = [sum(f['size'] for f in pdis[k]) for k in keys_sorted]
-    dis_numflows = [sum(f['size'] for f in dis[k]) for k in keys_sorted]
+    pdis_bytes = [sum(f['size'] for f in pdis[k]) for k in keys_sorted]
+    dis_bytes = [sum(f['size'] for f in dis[k]) for k in keys_sorted]
+    # pdb.set_trace()
+
     plt.cla()
     plt.clf()
     ind = np.arange(len(pdis))
     width = 0.35
     plt.xlabel('Application')
     plt.ylabel('Traffic Volume (Bytes)')
-    plt.ylim(1e5, 1e12)
-    plt.xticks(ind + width, tuple(dis.keys()))
-    pdis_bar = plt.bar(ind, pdis_numflows, width, color='g', log=True)
-    dis_bar = plt.bar(ind+width, dis_numflows, width, color='b', log=True)
-    plt.legend((pdis_bar[0], dis_bar[0]), ('Pre-Disaggregation', 'Disaggregated'))
+    plt.ylim(1e10, 1e12)
+    plt.xticks(ind + width, tuple(keys_sorted))
+    pdis_bar = plt.bar(ind, pdis_bytes, width, color='g', log=False)
+    dis_bar = plt.bar(ind+width, dis_bytes, width, color='b', log=False)
+    plt.legend((pdis_bar[0], dis_bar[0]), ('Pre-Disaggregation', 'Disaggregated'), loc='upper left')
     plt.savefig('graph5_trafficvolume.pdf')
     print 'graph5'
     return
@@ -236,7 +202,7 @@ def graph7(pdis, dis):
 
 
 def collectAllFlows():
-    apps = ['graphlab', 'memcached', 'terasort', 'wordcount', 'wordcount-hadoop']  # "don't show anything from storm" - peter
+    apps = ['graphlab', 'memcached', 'terasort', 'wordcount', 'wordcount-hadoop']
     apps = [(s, 'results/{}'.format(s)) for s in apps]
     pdis_file = '{}/nic_flows.txt'
     dis_file = '{}/res-based_timeonly_flows.txt'
@@ -256,5 +222,6 @@ def collectAllFlows():
 if __name__ == '__main__':
     pdis, dis = collectAllFlows()
     assert(len(pdis) == len(dis))
-    fns = [graph1, graph2, graph3, graph4, graph5, graph6, graph7]
+    # fns = [graph1, graph2, graph3, graph4, graph5, graph6, graph7]
+    fns = [graph2, graph3]
     map(lambda x: x(pdis, dis), fns)

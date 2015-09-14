@@ -27,7 +27,7 @@ def readFiles(fnames):
         else:
             continue
 
-    return {node: readFlows(fns[node]) for node in fns.keys() if node != 'nicmap'}, fns['nicmap']
+    return {node: (fns[node][2:], readFlows(fns[node])) for node in fns.keys() if node != 'nicmap'}, fns['nicmap']
 
 
 def readNicMap(fname):
@@ -35,24 +35,36 @@ def readNicMap(fname):
         return {sp[-1]: int(sp[0]) for sp in (l.split() for l in f.readlines())}
 
 
+def altMap(fname):
+    with open(fname) as f:
+        return {sp[-1]: int(sp[1]) for sp in (l.split() for l in f.readlines())}
+
+
 def makeFlows(nodes, mapfn):
     mapping = readNicMap(mapfn)
+    altmapping = altMap(mapfn)
     print mapping
+    print altmapping
     random.seed(0)
     # hosts = random.sample(xrange(144), len(nodes))
 
     earliestTime = min(f['time'] for f in sum(nodes.values(), []))
-    return sorted(sum(([{
-                      'time': f['time'] - earliestTime,
-                      'src': int(mapping[f['src']]),
-                      'dst': int(mapping[f['dst']]),
-                      'size': f['size']
-                      } for f in nodes[n] if (f['src'] in mapping and f['dst'] in mapping)]
-                  for n in nodes), []), key=lambda f: f['time'])
+    flows = []
+    for n in nodes.keys():
+        fn, fs = nodes[n]
+        flows.append([{'time': f['time'] - earliestTime,
+                       'src': int(mapping[f['src']]),
+                       'dst': int(mapping[f['dst']]),
+                       'size': f['size']
+                       } for f in fs
+                     if altmapping[f['src']] == fn]
+                     )
+    flows.sort(key=lambda f: f['time'])
+    return flows
 
 
 def run(outDir, traces):
-    outfname = outDir + 'nic_flows.txt'
+    outfname = outDir + 'new_nic_flows.txt'
     nodes, nicmapfn = readFiles(traces)
     flows = makeFlows(nodes, nicmapfn)
     fid = 0

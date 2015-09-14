@@ -210,7 +210,7 @@ def makeFlows(nodes, data, opts):
             memFlows = []
             if (len(mems) > 0):
                 memAddrs = [m['addr'] for m in mems]
-                localRange = max(memAddrs) - min(memAddrs)
+                localRange = float(max(memAddrs) - min(memAddrs))
                 for mem in mems:
                     h = int((mem['addr'] / localRange) * numNodes)
                     if (opts[0] == ARCH_RES_BASED):
@@ -256,7 +256,7 @@ def makeFlows(nodes, data, opts):
 
             if (len(disks) > 0):
                 diskAddrs = [d['addr'] for d in disks]
-                localRange = max(diskAddrs) - min(diskAddrs)
+                localRange = float(max(diskAddrs) - min(diskAddrs))
                 currNicFlow = nicFlows.pop()
                 for disk in disks:
                     if (opts[0] == ARCH_RES_BASED):
@@ -317,11 +317,6 @@ def makeFlows(nodes, data, opts):
     [t.start() for t in threads]
     [t.join() for t in threads]
 
-    # for n in nodes.keys():
-    #    if (n == 'nicmap'):
-    #        continue
-    #    processNode(n, nodes)
-
     memFlows = sum((v['mem'] for v in flowsByNode.values()), [])
     diskFlows = sum((v['disk'] for v in flowsByNode.values()), [])
 
@@ -340,6 +335,7 @@ def collapseFlows(flows, opts):
         addr = first['addr']
         dispaddr = first['disp-addr']
         totalSize = sum(f['size'] for f in fs)
+        assert("mem" not in typ)  # mem flows should not be combined...
         return {'time': time, 'src': src, 'dst': dst, 'type': typ, 'size': totalSize, 'addr': addr, 'disp-addr': dispaddr}
 
     # fs are flows with same src and dest
@@ -410,23 +406,6 @@ def collapseFlows(flows, opts):
             collapsed += list(map(combine, grp(fs)))
     collapsed.sort(key=lambda f: f['time'])
     return collapsed
-
-
-'''
-def plotAddressAccessOverTime(flows, prefix=None):
-    memFlows = [f for f in flows if 'mem' in f['type']]
-    memFlows.sort(key=lambda x: x['time'])
-    times = [f['time'] for f in memFlows]
-    addrs = [f['addr'] for f in memFlows]
-
-    plt.clf()
-    plt.cla()
-    plt.title('Addresses Accessed Over Time')
-    plt.xlabel('Time')
-    plt.ylabel('Address')
-    plt.plot(times, addrs, 'b.')
-    plt.savefig('address_accesses.png')
-'''
 
 
 def writeFlows(flows, outDir, arrangement, opt):

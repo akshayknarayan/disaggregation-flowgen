@@ -4,7 +4,7 @@ import sys
 import itertools
 
 import numpy as np
-import scipy.stats
+# import scipy.stats
 import matplotlib
 matplotlib.use('Agg')
 from matplotlib import pyplot as plt
@@ -21,7 +21,7 @@ def readFlows(filename):
             'size': float(sp[4]),
             'type': sp[5]
             } for sp
-            in [l.split() for l in open(filename)]
+            in (l.split() for l in open(filename))
             ]
 
 
@@ -198,9 +198,9 @@ if __name__ == '__main__':
 
     print 'read', len(flows), 'flows'
 
-    flowSizes(flows, prefix=mode)
+    # flowSizes(flows, prefix=mode)
     #  sdAnalysis(flows)
-    sourceInterarrival(flows, prefix=mode)
-    burstinessAnalysis(flows, prefix=mode)
+    # sourceInterarrival(flows, prefix=mode)
+    # burstinessAnalysis(flows, prefix=mode)
 
-    #  outputSimulatorFriendly('sim_'+sys.argv[1]+'.txt', flows)
+    outputSimulatorFriendly('sim_'+sys.argv[1]+'.txt', flows)
