@@ -38,6 +38,9 @@ def cdf(nums, method='full'):
         N = len(nums)
         xaxis = np.sort(nums)
         yaxis = np.array(range(N))/float(N)
+        if (yaxis[0] != 0):
+            xaxis = np.concatenate(([xaxis[0] - 0.001], xaxis))
+            yaxis = np.concatenate(([0.00], yaxis))
         return xaxis, yaxis
     else:
         hist, xaxis = np.histogram(nums, normed=True)

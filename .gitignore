@@ -3,3 +3,6 @@ traces/
 *.hi
 *.o
 *.pyc
+graph*.pdf
+varying_rmem_traces/
+heatmaps.pickle

@@ -27,7 +27,7 @@ def readFiles(fnames):
         else:
             continue
 
-    return {node: (fns[node][2:], readFlows(fns[node])) for node in fns.keys() if node != 'nicmap'}, fns['nicmap']
+    return {node: (fns[node].split('-nic-')[-1], readFlows(fns[node])) for node in fns.keys() if node != 'nicmap'}, fns['nicmap']
 
 
 def readNicMap(fname):
@@ -37,7 +37,7 @@ def readNicMap(fname):
 
 def altMap(fname):
     with open(fname) as f:
-        return {sp[-1]: int(sp[1]) for sp in (l.split() for l in f.readlines())}
+        return {sp[-1]: sp[1] for sp in (l.split() for l in f.readlines())}
 
 
 def makeFlows(nodes, mapfn):
@@ -48,23 +48,25 @@ def makeFlows(nodes, mapfn):
     random.seed(0)
     # hosts = random.sample(xrange(144), len(nodes))
 
-    earliestTime = min(f['time'] for f in sum(nodes.values(), []))
+    earliestTime = min(f['time'] for f in sum((j[1] for j in nodes.values()), []))
     flows = []
     for n in nodes.keys():
         fn, fs = nodes[n]
-        flows.append([{'time': f['time'] - earliestTime,
-                       'src': int(mapping[f['src']]),
-                       'dst': int(mapping[f['dst']]),
-                       'size': f['size']
-                       } for f in fs
-                     if altmapping[f['src']] == fn]
-                     )
+        n_flows = [{'time': f['time'] - earliestTime,
+                    'src': int(mapping[f['src']]),
+                    'dst': int(mapping[f['dst']]),
+                    'size': f['size']
+                    } for f in fs
+                   if f['src'] in mapping and f['dst'] in mapping and f['src'] in altmapping and altmapping[f['src']] == fn]
+        flows += n_flows
+    flows = filter(lambda f: f['src'] != -1 and f['dst'] != -1, flows)
+    flows = filter(lambda f: f['size'] > 0, flows)
     flows.sort(key=lambda f: f['time'])
     return flows
 
 
 def run(outDir, traces):
-    outfname = outDir + 'new_nic_flows.txt'
+    outfname = outDir + 'nic_flows.txt'
     nodes, nicmapfn = readFiles(traces)
     flows = makeFlows(nodes, nicmapfn)
     fid = 0

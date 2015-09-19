@@ -14,6 +14,7 @@ def readTraceInfo(fileName):
 
 
 def runexp(outDir, percentage, traces):
+    print 'starting', percentage, rmemdir
     run('{}/{}_remote/'.format(outDir, percentage), traces)
     print "finished", rmemdir
 
@@ -24,6 +25,8 @@ if __name__ == '__main__':
     threads = []
     for rmemdir in sys.argv[2:]:
         percentage = readTraceInfo(traceinfoTemplate.format(rmemdir))
+        if (int(percentage) > 30):
+            continue
         print rmemdir, percentage
         subprocess.call('mkdir -p {}/{}_remote'.format(outDir, percentage), shell=True)
         traces = map((lambda y: '{}/{}'.format(rmemdir, y)),
@@ -34,4 +37,7 @@ if __name__ == '__main__':
     threads.sort(key=lambda a: a[0])
     for t in threads:
         t[1].start()
-        t[1].join(3600)
+        t[1].join(5000)
+
+    # call me to let me know it's done.
+    subprocess.call("curl -X POST https://maker.ifttt.com/trigger/call_me/with/key/cTyEB1Uga6onvmR6HioIs- > /dev/null 2> /dev/null", shell=True)

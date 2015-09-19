@@ -1,17 +1,21 @@
 #!/usr/bin/python
 
+import subprocess
 import numpy as np
 # import scipy.stats
 import matplotlib
+import matplotlib.cm
+import matplotlib.colors
 import itertools
 # from scipy.interpolate import UnivariateSpline
 matplotlib.use('Agg')
 from matplotlib import pyplot as plt
 
-from readFlowTrace import readFlows, cdf, interarrivals
+from readFlowTrace import cdf, interarrivals
 import threading
 
-import pdb
+import pickle
+# import pdb
 
 # Graph function takes 2 dicts with structure keys = application name, value = list of flows
 
@@ -25,11 +29,14 @@ def graph1(pdis, dis):
         plt.xlim(1, 1e10)
         plt.ylabel('CDF')
         plt.xlabel('Flow Size, Bytes')
-        sorted_apps = sorted(apps.keys())
-        for app in sorted_apps:
+        keys_sorted = ['wordcount-hadoop', 'wordcount', 'terasort', 'graphlab', 'memcached']
+        for app in keys_sorted:
             x, y = cdf([f['size'] for f in apps[app]])
             plt.semilogx(x, y, label=app)
-        plt.legend(loc='lower right')
+        if ('_pdis' in name):
+            plt.legend(loc='lower right')
+        else:
+            plt.legend(loc='lower right')
         plt.savefig(name)
     makeGraph('graph1_sizedist_pdis.pdf', pdis)
     makeGraph('graph1_sizedist_dis.pdf', dis)
@@ -39,7 +46,7 @@ def graph1(pdis, dis):
 
 # Graph 2: Number of flows in \dis and \pdis. One single bar graph, two bars for each application --- one for #flows in \dis and the other for #flows in \pdis.
 def graph2(pdis, dis):
-    keys_sorted = sorted(pdis.keys())
+    keys_sorted = ['wordcount-hadoop', 'wordcount', 'terasort', 'graphlab', 'memcached']
     pdis_numflows = [len(pdis[k]) for k in keys_sorted]
     dis_numflows = [len(dis[k]) for k in keys_sorted]
     plt.cla()
@@ -48,7 +55,7 @@ def graph2(pdis, dis):
     width = 0.35
     plt.xlabel('Application')
     plt.ylabel('Number of Flows')
-    plt.ylim(1e2, 1e7)
+    plt.ylim(1e1, 1e9)
     plt.xticks(ind + width, tuple(keys_sorted))
     pdis_bar = plt.bar(ind, pdis_numflows, width, log=True, color='g')
     dis_bar = plt.bar(ind+width, dis_numflows, width, log=True, color='b')
@@ -60,19 +67,22 @@ def graph2(pdis, dis):
 
 # Graph 3: #bytes in different flow bucket sizes for \dis and \pdis. One single stack-bar graph, two bars for each application, one stack for each bucket size --- one for #bytes in \dis and the other for #bytes in \pdis.
 def graph3(pdis, dis):
+    return  # this graph is no longer being included.
+
     def makeGraph(name, title, apps):
-        keys_sorted = sorted(apps.keys())
-        buckets = np.logspace(2, 8, num=7)
-        bucketized = {k: np.histogram([f['size'] for f in apps[k]], bins=buckets)[0] for k in keys_sorted}
+        keys_sorted = ['wordcount-hadoop', 'wordcount', 'terasort', 'graphlab', 'memcached']
+        buckets = np.logspace(10, 1, num=10) * -1
+        bucketized = {k: np.histogram([f['size'] * -1 for f in apps[k]], bins=buckets)[0] for k in keys_sorted}
 
         plt.cla()
         plt.clf()
         plt.xlabel('Bins: Bytes')
         plt.ylabel('Number of Flows')
-        plt.ylim(1, 1e7)
+        plt.ylim(1, 1e8)
         plt.title(title)
         ind = np.arange(len(buckets) - 1)
-        plt.xticks(ind, buckets)
+        bucket_labels = map(lambda b: r"$10^{%d}$" % (np.log10(b)), (buckets * -1)[::-1])
+        plt.xticks(ind, bucket_labels)
 
         for k in keys_sorted:
             plt.semilogy(ind, bucketized[k], 'o-', label=k)
@@ -80,7 +90,7 @@ def graph3(pdis, dis):
         if ('_pdis' in name):
             plt.legend(loc='upper left')
         else:
-            plt.legend(loc='lower left')
+            plt.legend(loc='lower right')
         plt.savefig(name)
     makeGraph('graph3_sizebins_pdis.pdf', 'Pre-Disaggregation Binned Flow Sizes', pdis)
     makeGraph('graph3_sizebins_dis.pdf', 'Post-Disaggregation Binned Flow Sizes', dis)
@@ -90,7 +100,7 @@ def graph3(pdis, dis):
 
 # Graph 4: Flow arrival time distribution in \dis and \pdis. All the applications go into one figure: multiple lines in the CDF, one for each application. The same thing for \pdis.
 def graph4(pdis, dis):
-    keys_sorted = sorted(pdis.keys())
+    keys_sorted = ['wordcount-hadoop', 'wordcount', 'terasort', 'graphlab', 'memcached']
 
     def makeGraph(name, apps):
         plt.cla()
@@ -117,7 +127,7 @@ def graph4(pdis, dis):
 
 # Graph 5: Traffic volume in \dis and \pdis. One single bar graph, two bars for each application --- one for volume in \dis and the other for volume in \pdis.
 def graph5(pdis, dis):
-    keys_sorted = sorted(pdis.keys())
+    keys_sorted = ['wordcount-hadoop', 'wordcount', 'terasort', 'graphlab', 'memcached']
     pdis_bytes = [sum(f['size'] for f in pdis[k]) for k in keys_sorted]
     dis_bytes = [sum(f['size'] for f in dis[k]) for k in keys_sorted]
     # pdb.set_trace()
@@ -140,33 +150,59 @@ def graph5(pdis, dis):
 
 # Graph 6: Spatial traffic distribution in \dis and \pdis. A n \times n matrix heat diagram, with cell $(i, j)$ having heat level corresponding to the traffic volume between source i and destination j (aggregated across time). The same thing for \pdis.
 def graph6(pdis, dis):
-    def makeGraph(name, apps, app):
+    def makeMaps(apps, app):
         flows = apps[app]
-        hosts = list(set(f['src'] for f in flows) & set(f['dst'] for f in flows))
+        hosts = list(set(int(f['src']) for f in flows) & set(int(f['dst']) for f in flows))
         hosts.sort()
-        hostmap = {hosts[i]: i for i in xrange(len(hosts))}
-        heatmap = np.zeros((len(hosts), len(hosts)))
+        heatmap = [[0 for _ in range(len(hosts))] for _ in range(len(hosts))]
         sdpairs = sum(([(i, j) for j in hosts if i != j] for i in hosts), [])
-        sdflows = {(s, d): sum(f['size'] for f in flows if f['src'] == s and f['dst'] == d) for s, d in sdpairs}
-        # pdb.set_trace()
+        sdflows = {(s, d): sum(f['size'] for f in flows if int(f['src']) == s and int(f['dst']) == d) for s, d in sdpairs}
         for s, d in sdflows.keys():
-            if (s not in hostmap or d not in hostmap):
+            if (s not in hosts or d not in hosts or s >= len(heatmap) or d >= len(heatmap)):
                 continue
-            s1 = hostmap[s]
-            d1 = hostmap[d]
-            heatmap[s1][d1] = sdflows[(s, d)]
+            heatmap[s][d] = sdflows[(s, d)]
 
+        # eliminate extra row
+        heatmap = map(lambda l: l[:5] + l[6:], heatmap)
+        heatmap = heatmap[:5] + heatmap[6:]
+        heatmap = np.array(heatmap)
+        return heatmap
+
+    def makeGraph(name, app, heatmap):
         plt.cla()
         plt.clf()
-        plt.ylim(0, len(hosts))
-        plt.xlim(0, len(hosts))
+        plt.ylim(0, len(heatmap))
+        plt.xlim(0, len(heatmap))
         plt.xlabel('Sources')
         plt.ylabel('Destinations')
-        plt.pcolor(heatmap)
+        if ("_pdis" in name):
+            plt.xticks(np.arange(5) + 0.5, np.arange(5))
+            plt.yticks(np.arange(5) + 0.5, np.arange(5))
+        else:
+            plt.xticks(np.arange(13) + 0.5, (['cpu'] * 5 + ['mem'] * 5 + ['disk'] * 3))
+            plt.yticks(np.arange(13) + 0.5, (['cpu'] * 5 + ['mem'] * 5 + ['disk'] * 3))
+        norm = matplotlib.colors.LogNorm(vmin=1e0, vmax=1e12)
+        hmap = plt.pcolor(heatmap, cmap=matplotlib.cm.Reds, norm=norm)
+        cbar = plt.colorbar(hmap)
+        cbar.ax.set_yticklabels(np.logspace(0, 12, num=13))
         plt.savefig(name.format(app))
+
+    try:
+        heatmaps = pickle.load(open('heatmaps.pickle', 'r'))
+    except:
+        heatmaps = {}
+        for app in pdis.keys():
+            heatmaps[app] = {}
+            m1 = makeMaps(dis, app)
+            heatmaps[app]['dis'] = m1
+            m2 = makeMaps(pdis, app)
+            heatmaps[app]['pdis'] = m2
+
+        pickle.dump(heatmaps, open('heatmaps.pickle', 'w'))
+
     for app in pdis.keys():
-        makeGraph('graph6_trafficvolumeheatmap_pdis_{}.pdf', pdis, app)
-        makeGraph('graph6_trafficvolumeheatmap_dis_{}.pdf', dis, app)
+        makeGraph('graph6_trafficvolumeheatmap_pdis_{}.pdf', app, heatmaps[app]['pdis'])
+        makeGraph('graph6_trafficvolumeheatmap_dis_{}.pdf', app, heatmaps[app]['dis'])
     print 'graph6'
     return
 
@@ -201,6 +237,17 @@ def graph7(pdis, dis):
     return
 
 
+def readFlows(filename):
+    return [{
+            'time': float(sp[1]),
+            'src': sp[2],
+            'dst': sp[3],
+            'size': int(sp[4]),
+            } for sp
+            in (l.split() for l in open(filename))
+            ]
+
+
 def collectAllFlows():
     apps = ['graphlab', 'memcached', 'terasort', 'wordcount', 'wordcount-hadoop']
     apps = [(s, 'results/{}'.format(s)) for s in apps]
@@ -221,7 +268,15 @@ def collectAllFlows():
 
 if __name__ == '__main__':
     pdis, dis = collectAllFlows()
+    print 'read flows'
     assert(len(pdis) == len(dis))
-    # fns = [graph1, graph2, graph3, graph4, graph5, graph6, graph7]
-    fns = [graph2, graph3]
+    # fns = [graph6, graph7]
+    fns = [graph6]
+
     map(lambda x: x(pdis, dis), fns)
+    # threads = [threading.Thread(target=f, args=(pdis, dis)) for f in fns]
+    # [t.start() for t in threads]
+    # [t.join() for t in threads]
+
+    # call me to let me know it's done.
+    subprocess.call("curl -X POST https://maker.ifttt.com/trigger/text_me/with/key/cTyEB1Uga6onvmR6HioIs- > /dev/null 2> /dev/null", shell=True)

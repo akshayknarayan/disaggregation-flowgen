@@ -35,11 +35,12 @@ def readMemoryLine(line, node):
 
     rw = 'r' if timestamp.startswith('-') else 'w'
     if (rw == 'r'):
-        timestamp = int(timestamp) * -1
+        timestamp = float(timestamp) * -1
     else:
-        timestamp = int(timestamp)
+        timestamp = float(timestamp)
 
     timestamp /= 1e6
+
     rid = int(rid)
     addr = int(addr)  # + (23e9/4096) * node  # remote memory is 23GB per machine
     length = int(length) * int(pgSize)  # get in bytes
@@ -54,12 +55,35 @@ def readMemoryLine(line, node):
     }
 
 
-def readMemoryTrace(filename, node):
+def readMemoryTrace_nobatch(filename, node):
     '''
     all memory accesses in a given trace are between 2 given nodes.
     '''
     with open(filename, 'r') as trace:
         return [readMemoryLine(line, node) for line in trace]
+
+
+def readMemoryTrace(filename, node):
+    '''
+    all memory accesses in a given trace are between 2 given nodes.
+    '''
+    def readMemoryTrace_gen(lines):
+        curr = None
+        for line in lines:
+            memFlow = readMemoryLine(line, node)
+            if (curr is None):
+                curr = memFlow
+                continue
+            elif (memFlow['batch_seq_no'] == 0):
+                yield curr
+                curr = memFlow
+            else:
+                curr['length'] += memFlow['length']
+        yield curr
+
+    with open(filename, 'r') as trace:
+        # return [readMemoryLine(line, node) for line in trace]
+        return list(readMemoryTrace_gen(trace))
 
 
 def readDiskLine(line, time_offset, node):
@@ -103,18 +127,16 @@ def readNicFlows(fname, node):
 
 def readNicMap(fname):
     with open(fname) as f:
-        nm = {sp[-1]: int(sp[0]) for sp in (l.split() for l in f.readlines())}
-        print nm
-        return nm
+        return {sp[-1]: int(sp[0]) for sp in (l.split() for l in f.readlines())}
 
 
 def readFiles(fileNames):
     fns = {}
     for name in fileNames:
         fname = name.split('/')[-1]
-        if fname == 'traceinfo.txt':
+        if 'traceinfo.txt' in fname:
             continue
-        if 'addr_mapping.txt' == fname:
+        if 'addr_mapping.txt' in fname:
             fns['nicmap'] = name
             continue
         node = int(fname.split('-')[0])
@@ -146,7 +168,7 @@ def readFiles(fileNames):
     nodes = {}
     nodes['nicmap'] = readNicMap(fns['nicmap'])
     lock = threading.Lock()
-    threads = [threading.Thread(target=readNode, args=(n, fns[node], lock)) for n in fns.keys() if n != 'nicmap']
+    threads = [threading.Thread(target=readNode, args=(n, fns[n], lock)) for n in fns.keys() if n != 'nicmap']
     [t.start() for t in threads]
     [t.join() for t in threads]
 
@@ -179,6 +201,36 @@ def getTrafficData(nodes):
     print 'bandwidth per unit resource (bps / 1 GB memory, bps / 1 GB disk)', memBandiwdthDemandPerUnit, diskBandwidthDemandPerUnit
 
     return (earliestTime, duration, memRange, memTotalVolume, memBandiwdthDemandPerUnit, diskRange, diskTotalVolume, diskBandwidthDemandPerUnit)
+
+
+def checkNicFlows(nic, disk):
+    nic.sort(key=lambda f: f['size'])
+    disk.sort(key=lambda f: f['time'])
+    shortNicFlows = list(itertools.takewhile(lambda f: f['size'] < 4096, nic))
+    numShortNicFlows = len(shortNicFlows)
+    unmatched = []
+    matchedDiskFlows = []
+    for sn in shortNicFlows:
+        st = sn['start_time']
+        en = sn['end_time']
+        for d in disk:
+            if (d['time'] > st and d['time'] < en and d not in matchedDiskFlows):
+                matchedDiskFlows.append(d)
+                break
+        else:
+            unmatched.append(sn)
+    print 'Unmatched short nic flows:', len(unmatched), numShortNicFlows
+    otherNicFlows = itertools.dropwhile(lambda f: f['size'] < 4096, nic)
+    for on in otherNicFlows:
+        st = on['start_time']
+        en = on['end_time']
+        for d in disk:
+            if (d['time'] > st and d['time'] < en and d not in matchedDiskFlows):
+                matchedDiskFlows.append(d)
+                break
+        else:
+            unmatched.append(sn)
+    print 'Unmatched total nic flows:', len(unmatched), len(nic)
 
 
 def makeFlows(nodes, data, opts):
@@ -239,7 +291,7 @@ def makeFlows(nodes, data, opts):
                             'addr': mem['addr']
                         }
                     )
-                flowsByNode[n]['disk'] += memFlows
+                flowsByNode[n]['mem'] += memFlows
                 del memAddrs
                 del memFlows
 
@@ -249,7 +301,9 @@ def makeFlows(nodes, data, opts):
             nicFlows = filter(lambda f: f['dst'] == n, nicFlows)
             if (len(nicFlows) == 0):
                 pdb.set_trace()
+            checkNicFlows(nicFlows, filter(lambda d: d['rw'] != 'w', disks))
             nicFlows.sort(key=lambda f: -1 * f['start_time'])
+            currNicFlow = nicFlows.pop()
 
             disks.sort(key=lambda f: f['time'])
             diskFlows = []
@@ -257,7 +311,6 @@ def makeFlows(nodes, data, opts):
             if (len(disks) > 0):
                 diskAddrs = [d['addr'] for d in disks]
                 localRange = float(max(diskAddrs) - min(diskAddrs))
-                currNicFlow = nicFlows.pop()
                 for disk in disks:
                     if (opts[0] == ARCH_RES_BASED):
                         h = int((disk['addr'] / localRange) * 3) + (2 * numNodes)  # there are 3 disk nodes.
@@ -272,7 +325,7 @@ def makeFlows(nodes, data, opts):
                         time = disk['time']
                         if (currNicFlow is not None and 'size' not in currNicFlow.keys()):
                             pdb.set_trace()
-                        while (currNicFlow is not None and not (currNicFlow['size'] > disk['length'] and time > currNicFlow['start_time'] and time < currNicFlow['end_time'])):
+                        while (currNicFlow is not None and not (currNicFlow['size'] > 0 and time > currNicFlow['start_time'] and time < currNicFlow['end_time'])):
                             currNicFlow = nicFlows.pop() if len(nicFlows) > 0 else None
 
                         if (currNicFlow is not None):
@@ -335,7 +388,7 @@ def collapseFlows(flows, opts):
         addr = first['addr']
         dispaddr = first['disp-addr']
         totalSize = sum(f['size'] for f in fs)
-        assert("mem" not in typ)  # mem flows should not be combined...
+        # assert("mem" not in typ)  # mem flows should not be combined...
         return {'time': time, 'src': src, 'dst': dst, 'type': typ, 'size': totalSize, 'addr': addr, 'disp-addr': dispaddr}
 
     # fs are flows with same src and dest
@@ -448,7 +501,8 @@ def run(outDir, traces):
         for opt in [COMB_TIMEONLY]:
             # only disk flows get combined.
             disk_col_flows = collapseFlows(disk, opt)
-            writeFlows(mergeSortedLists(mem, disk_col_flows), outDir, arrangement, opt)
+            mem_col_flows = collapseFlows(mem, opt)
+            writeFlows(mergeSortedLists(mem_col_flows, disk_col_flows), outDir, arrangement, opt)
 
 
 if __name__ == '__main__':
