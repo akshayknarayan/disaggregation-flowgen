@@ -11,6 +11,7 @@ import random
 # import matplotlib.pyplot as plt
 
 import threading
+import pickle
 
 import pdb
 
@@ -158,9 +159,20 @@ def readFiles(fileNames):
 
     def readNode(node, n, lock):
         mem = readMemoryTrace(n['mem'], node)
+        # pickle.dump(mem, open('{}-mem.tmp'.format(node), 'w'))
+        # memfn = '{}-mem.tmp'.format(n)
+        # del mem
         disk = readDiskTrace(n['disk'], n['meta'], node)
+        # diskfn = '{}-disk.tmp'.format(n)
+        # pickle.dump(disk, open('{}-disk.tmp'.format(node), 'w'))
+        # del disk
         nic = readNicFlows(n['nic'], node)
+        # nicfn = '{}-nic.tmp'.format(n)
+        # pickle.dump(nic, open('{}-nic.tmp'.format(node), 'w'))
+        # del nic
+
         lock.acquire()
+        # print '{} tmps'.format(node)
         nodes[node] = {'mem': mem, 'disk': disk, 'nic': nic, 'lock': threading.Lock()}
         lock.release()
         return
@@ -178,6 +190,10 @@ def readFiles(fileNames):
 
 def getTrafficData(nodes):
     nodes_keys = filter(lambda f: f != 'nicmap', nodes.keys())
+    #times = [f['time'] for f in itertools.chain(
+    #    itertools.chain.from_iterable(pickle.load(open(nodes[n]['disk'])) for n in nodes_keys),
+    #    itertools.chain.from_iterable(pickle.load(open(nodes[n]['mem'])) for n in nodes_keys)
+    #)]
     times = [f['time'] for f in itertools.chain(
         itertools.chain.from_iterable(nodes[n]['disk'] for n in nodes_keys),
         itertools.chain.from_iterable(nodes[n]['mem'] for n in nodes_keys)
@@ -185,12 +201,16 @@ def getTrafficData(nodes):
     earliestTime = min(times)
     duration = max(times) - earliestTime
 
+    # memAddrs = [m['addr'] for m in itertools.chain.from_iterable(pickle.load(open(nodes[n]['mem'])) for n in nodes_keys)]
     memAddrs = [m['addr'] for m in itertools.chain.from_iterable(nodes[n]['mem'] for n in nodes_keys)]
     memRange = max(memAddrs) - min(memAddrs)
+    # diskAddrs = [d['addr'] for d in itertools.chain.from_iterable(pickle.load(open(nodes[n]['disk'])) for n in nodes_keys)]
     diskAddrs = [d['addr'] for d in itertools.chain.from_iterable(nodes[n]['disk'] for n in nodes_keys)]
     diskRange = max(diskAddrs) - min(diskAddrs)
 
-    memTotalVolume = sum(m['length'] for m in itertools.chain.from_iterable(nodes[n]['mem'] for n in nodes_keys))
+    # memTotalVolume = sum(m['length'] for m in itertools.chain.from_iterable(pickle.load(open(nodes[n]['mem'])) for n in nodes_keys))
+    # diskTotalVolume = sum(d['length'] for d in itertools.chain.from_iterable(pickle.load(open(nodes[n]['disk'])) for n in nodes_keys))
+    memTotalVolume  = sum(m['length'] for m in itertools.chain.from_iterable(nodes[n]['mem'] for n in nodes_keys))
     diskTotalVolume = sum(d['length'] for d in itertools.chain.from_iterable(nodes[n]['disk'] for n in nodes_keys))
 
     memBandiwdthDemandPerUnit, diskBandwidthDemandPerUnit = ((memTotalVolume * 8) / duration) / (memRange * 4096 / 1e9), ((diskTotalVolume * 8) / duration) / (diskRange * 4096 / 1e9)
@@ -258,6 +278,7 @@ def makeFlows(nodes, data, opts):
         flowsByNode[n]['disk'] = []
 
         def processMemFlows():
+            # mems = pickle.load(open(nodes[n]['mem']))
             mems = nodes[n]['mem']
             memFlows = []
             if (len(mems) > 0):
@@ -296,7 +317,9 @@ def makeFlows(nodes, data, opts):
                 del memFlows
 
         def processDiskFlows():
+            # disks = pickle.load(open(nodes[n]['disk']))
             disks = nodes[n]['disk']
+            # nicFlows = [{'start_time': f['start_time'], 'end_time': f['end_time'], 'size': f['size'], 'src': nicmap[f['src']], 'dst': nicmap[f['dst']]} for f in pickle.load(open(nodes[n]['nic'])) if (f['src'] in nicmap and f['dst'] in nicmap) and (nicmap[f['src']] != -1 and nicmap[f['dst']] != -1)]
             nicFlows = [{'start_time': f['start_time'], 'end_time': f['end_time'], 'size': f['size'], 'src': nicmap[f['src']], 'dst': nicmap[f['dst']]} for f in nodes[n]['nic'] if (f['src'] in nicmap and f['dst'] in nicmap) and (nicmap[f['src']] != -1 and nicmap[f['dst']] != -1)]
             nicFlows = filter(lambda f: f['dst'] == n, nicFlows)
             if (len(nicFlows) == 0):
