@@ -13,8 +13,8 @@ import scala.io.Source
 
 import java.io.File
 
-class Flow(var id: Int, var time: Double, var src: Int, var dst: Int, var length: Long, var cat: String, var node: Int, var addr: Int) extends Serializable
-class NicFlow(var id: Int, var start: Double, var end: Double, var src: Int, var dst: Int, var length: Long) extends Serializable
+class Flow(var id: Long, var time: Double, var src: Int, var dst: Int, var length: Long, var cat: String, var node: Int, var addr: Int) extends Serializable
+class NicFlow(var id: Long, var start: Double, var end: Double, var src: Int, var dst: Int, var length: Long) extends Serializable
 
 object LogHolder extends Serializable {
     @transient lazy val log = Logger.getLogger(getClass.getName)
@@ -25,18 +25,69 @@ object ProcessTrace {
         val conf = new SparkConf().setAppName("Process Trace")
         val sc = new SparkContext(conf)
         val numPartitions = args.head.toInt
-        val traces = args.tail
+        val traces = args.tail.map(s => if (s.last == '/') s.dropRight(1) else s)
 
-        //LogHolder.log.warn(args.toList.reduce(_ + " " + _))
-        traces.map(processTrace(_, sc, numPartitions))
+        LogHolder.log.warn(s"input traces: ${traces.toList.reduce(_ + " " + _)}")
+        traces.map(processTrace(_, sc, numPartitions)).map(_ match {
+            case (traceName: String, nf: RDD[NicFlow], fs: RDD[Flow]) => {
+                LogHolder.log.warn(s"writing chart data: ${traceName}")
+                fig6abcd(traceName, nf, fs)
+                fig6ef(traceName, nf, fs)
+            }
+        })
+
         sc.stop()
     }
 
-    def processTrace(tracedir: String, sc: SparkContext, numPartitions: Int) {
+    def write(fn: String, out:String) = {
+        val pw = new java.io.PrintWriter(new File(fn))
+        try pw.write(out) finally pw.close()
+    }
+
+    def fig6abcd(traceName: String, nf: RDD[NicFlow], fs: RDD[Flow]) {
+        // number of flows
+        val nfCount = nf.count
+        write(s"/scratch/akshay/disaggregation-flowgen/flowgen-spark/results/${traceName}/fig6c-pdis", (s"${nfCount}\n"))
+        val fsCount = fs.count
+        write(s"/scratch/akshay/disaggregation-flowgen/flowgen-spark/results/${traceName}/fig6c-dis", (s"${fsCount}\n"))
+        
+        // flow size distribution (CDF)
+        // a for fs (dis), b for nf (predis)
+        val nfSizes = nf.map(_.length)
+        nfSizes.sortBy(a => a).zipWithIndex.map(_ match {
+            case (size: Long, idx: Long) => s"${size} ${idx.toDouble / nfCount}"
+        }).saveAsTextFile(s"/scratch/akshay/disaggregation-flowgen/flowgen-spark/results/${traceName}/fig6b-pdis")
+
+        val fsSizes = fs.map(_.length)
+        fsSizes.sortBy(a => a).zipWithIndex.map(_ match {
+            case (size: Long, idx: Long) => s"${size} ${idx.toDouble / fsCount}"
+        }).saveAsTextFile(s"/scratch/akshay/disaggregation-flowgen/flowgen-spark/results/${traceName}/fig6a-dis")
+
+        // traffic volume
+        val nfVolume = nfSizes.reduce(_ + _)
+        write(s"/scratch/akshay/disaggregation-flowgen/flowgen-spark/results/${traceName}/fig6d-pdis", (s"${nfVolume}\n"))
+        val fsVolume = fsSizes.reduce(_ + _)
+        write(s"/scratch/akshay/disaggregation-flowgen/flowgen-spark/results/${traceName}/fig6d-dis", (s"${fsVolume}\n"))
+    }
+    def fig6ef(traceName: String, nf: RDD[NicFlow], fs: RDD[Flow]) {
+        // temporal distribution
+        // e for fs (dis), f for nf (predis)
+
+        val slotDuration = 0.001 // 100 ms
+        nf.sortBy(_.start).map(f => ((f.start / slotDuration).toLong, f.length)).reduceByKey(_ + _).map(_ match {
+            case (time: Long, volume: Long) => s"${time} ${volume * 8}"
+        }).saveAsTextFile(s"/scratch/akshay/disaggregation-flowgen/flowgen-spark/results/${traceName}/fig6f-pdis")
+
+        fs.sortBy(_.time).map(f => ((f.time / slotDuration).toLong, f.length)).reduceByKey(_ + _).map(_ match {
+            case (time: Long, volume: Long) => s"${time} ${volume * 8}"
+        }).saveAsTextFile(s"/scratch/akshay/disaggregation-flowgen/flowgen-spark/results/${traceName}/fig6e-dis")
+    }
+
+    def processTrace(tracedir: String, sc: SparkContext, numPartitions: Int): (String, RDD[NicFlow], RDD[Flow]) = {
         val traceFiles = new File(tracedir).listFiles.toList
         val filename = """(.*/)+(.*?)""".r
         val filename(_, traceName) = tracedir
-        LogHolder.log.warn("trace: " + traceName)
+        LogHolder.log.warn(s"tracedir: ${tracedir} trace: ${traceName}")
         var localMem = 0.0
         var addrMap = null: Map[String, Int]
         traceFiles.map(_.toString).filter(_.endsWith(".txt")).map(path => {
@@ -65,11 +116,17 @@ object ProcessTrace {
             }
         ).head), addrMap)
 
+        nicFlows.persist()
+
+        LogHolder.log.warn(s"nic flows: ${nicFlows.count}")
+
         nicFlows.map(
             nf => {
-                s"${nf.id} %.6f ${nf.src} ${nf.dst} ${nf.length}" format nf.start
+                s"${nf.id} ${"%.6f" format nf.start} ${nf.src} ${nf.dst} ${nf.length}"
             }
-        ).saveAsTextFile(s"./results/${traceName}/nic")
+        ).coalesce(1).saveAsTextFile(s"/scratch/akshay/disaggregation-flowgen/flowgen-spark/results/${traceName}/nic")
+
+        LogHolder.log.warn("Wrote nic trace: " + s"./results/${traceName}/nic")
 
         val tr = dataFiles.filter(
             path => {
@@ -88,20 +145,45 @@ object ProcessTrace {
 
         LogHolder.log.warn("finished memory flows starting disk")
         
-        val disk = processDiskFlows(all.filter(_.contains("disk")), nicFlows.repartition(numPartitions))
+        val disk = processDiskFlows(all.filter(_.contains("disk")), nicFlows.repartition(numPartitions), sc)
         
         LogHolder.log.warn("finished disk flows")
         
-        mem.union(disk).sortBy(_.time).zipWithIndex().map(
-            arr => {
-                val id = arr._2
-                val f = arr._1
-                s"$id ${f.src} ${f.dst} ${f.time} ${f.length} ${f.cat} ${f.node}-${f.addr}"
+        val combined = mem.union(disk).sortBy(_.time)
+
+        LogHolder.log.warn(s"Total number of flows ${combined.count}")
+
+        val startTime = combined.take(1)(0).time
+        val allFlows = combined.map(
+            f => {
+                new Flow(
+                    id = f.id,
+                    time = f.time - startTime,
+                    src = f.src,
+                    dst = f.dst,
+                    length = f.length,
+                    cat = f.cat,
+                    node = f.node, 
+                    addr = f.addr
+                )
             }
-        ).saveAsTextFile(s"./results/${traceName}/flows")
+        )
+
+        allFlows.persist()
+
+        allFlows.zipWithIndex().map(
+            tup => {
+                val id = tup._2
+                val f = tup._1
+                s"$id ${"%.6f" format f.time} ${f.src} ${f.dst} ${f.length} ${f.cat} ${f.node}-${f.addr}"
+            }
+        ).coalesce(1).saveAsTextFile(s"/scratch/akshay/disaggregation-flowgen/flowgen-spark/results/${traceName}/flows")
+
+        return (traceName, nicFlows, allFlows)
     }
 
     def processMemFlows(memFile: RDD[String]):RDD[Flow] = {
+        // find the range of memory addresses so we can hash to nodes in the next stage
         val memRange = memFile.flatMap(
             line => {
                 line.split(" ").toList match {
@@ -119,6 +201,7 @@ object ProcessTrace {
             (u1, u2) => (Math.max(u1._1, u2._1), Math.min(u1._2, u2._2))
         ).collect.toMap
 
+        // 
         val memFlows = memFile.flatMap(
             line => {
                 line.split(" ").toList match {
@@ -130,20 +213,20 @@ object ProcessTrace {
                                 val h = (addr / memRange(node)._1.toDouble).toInt * memRange.keys.iterator.length + memRange.keys.iterator.length
                                 if (start_addr(0) == '-') new Flow(
                                         id = batchid.toInt,
-                                        time = time.toDouble,
+                                        time = time.toDouble / 1e6,
                                         src = node,
                                         dst = h,
-                                        length = 4096l,
+                                        length = 4096l, // mem flow length always 4KB at this stage
                                         cat = "memWrite",
                                         node = node,
                                         addr = addr
                                     )
                                 else new Flow(
                                         id = batchid.toInt,
-                                        time = time.toDouble,
+                                        time = time.toDouble / 1e6,
                                         src = h,
                                         dst = node,
-                                        length = 4096l,
+                                        length = 4096l, // mem flow length always 4KB at this stage
                                         cat = "memRead",
                                         node = node,
                                         addr = addr
@@ -154,7 +237,7 @@ object ProcessTrace {
                     case _ => throw new Exception("mem trace format")
                 }
             }
-        ).keyBy(f => (f.id, f.src, f.dst)).reduceByKey(
+        ).keyBy(f => (f.id, f.src, f.dst)).reduceByKey( //aggregate the batches together
             (f1: Flow, f2: Flow) => 
                 new Flow(
                     id = 0, 
@@ -176,7 +259,12 @@ object ProcessTrace {
     def collapse(flows: RDD[Flow]): RDD[Flow] = {
         LogHolder.log.warn("collapsing")
 
-        flows.keyBy(flow => (Math.floor(flow.time / 50e-6).toInt, flow.src, flow.dst)).reduceByKey(
+        //collapse flows that are within 50us at the same src and dst
+        flows.keyBy(
+            flow => {
+                (Math.floor(flow.time / 50e-6).toLong, flow.src, flow.dst)
+            }
+        ).reduceByKey(
             (f1: Flow, f2: Flow) => 
                 new Flow(
                     id = 0, 
@@ -192,19 +280,16 @@ object ProcessTrace {
     }
 
     def processNicFlows(nicFile: RDD[String], nicHostMapping: Map[String, Int]): RDD[NicFlow] = {
-        nicFile.sortBy(_.split(" ")(0).toDouble).zipWithIndex.map(
-            tup => {
-                val line = tup._1 : String
-                val id = tup._2 : Long
+        var nfs = nicFile.map(
+            line => {
                 // start, end, src, dst, length, _
-                val sp = line.split(" ").toList
-                sp match {
+                line.split(" ").toList match {
                     case start :: end :: src :: dst :: length :: _ :: Nil => {
                         val hostname = "^(.*\\.ec2\\.internal).*$".r
                         val hostname(s) = src
                         val hostname(d) = dst 
                         new NicFlow(
-                            id = id.toInt, 
+                            id = 0, 
                             start = start.toDouble, 
                             end = end.toDouble, 
                             src = nicHostMapping.getOrElse(s, -1), 
@@ -215,14 +300,30 @@ object ProcessTrace {
                     case _ => throw new Exception("nic flow format") 
                 }
             }
-        ).filter(f => f.src != -1 && f.dst != -1)
+        ).filter(f => f.src != -1 && f.dst != -1).sortBy(_.start)
+        val firstStart = nfs.take(1)(0).start
+        nfs.zipWithIndex.map(
+            tup => {
+                val nf = tup._1: NicFlow
+                val id = tup._2: Long
+                new NicFlow(
+                    id     = id, 
+                    start  = nf.start - firstStart,
+                    end    = nf.end - firstStart,
+                    src    = nf.src,
+                    dst    = nf.dst,
+                    length = nf.length
+                )
+            }
+        )
     }
 
-    def processDiskFlows(diskFile: RDD[String], nicFlows: RDD[NicFlow]): RDD[Flow] = {
+    def processDiskFlows(diskFile: RDD[String], nicFlows: RDD[NicFlow], sc: SparkContext): RDD[Flow] = {
         if (nicFlows == null) {
             throw new Exception("nicFlows is null")
         }
 
+        // get address range for hashing to node
         val diskRange = diskFile.map(
             line => {
                 val sp = line.split(" ").toList
@@ -241,6 +342,7 @@ object ProcessTrace {
             (u1, u2) => (Math.max(u1._1, u2._1), Math.min(u1._2, u2._2))
         ).collect.toMap
 
+        // read input into RDD[Flow]
         val diskFlows = diskFile.map(
             line => 
                 line.split(" ").toList match {
@@ -281,23 +383,27 @@ object ProcessTrace {
 
         val writeFlows = diskFlows.filter(_.cat == "diskWrite")
         val readFlows = diskFlows.filter(_.cat == "diskRead")
+        readFlows.persist
 
-        //nicFlows.repartition(2000)
-        //readFlows.repartition(2000)
-
-        val uniq = readFlows.keyBy(_.src).groupWith(nicFlows.keyBy(_.dst)).map(_._2).flatMap(
-            (tup: (Iterable[Flow], Iterable[NicFlow])) => tup match {
-                case (dfs, nfs) if nfs.isEmpty => dfs.map(df => (df -> null))
-                case (dfs, nfs) => {
-                    dfs.map(
-                        df => {
-                            val matching = nfs.toList.filter(nf => df.time >= nf.start && df.time <= nf.end && df.length <= nf.length)
-                            (df -> (if (matching.isEmpty) null else matching.head))
-                        }
-                    )
+        // do source attribution from nic flows
+        val readFlows_bv = sc.broadcast(readFlows.collect.toList)
+        val matched = nicFlows.flatMap(
+            (nf: NicFlow) => {
+                val matching = readFlows_bv.value.filter(
+                    (df: Flow) => 
+                        df.src == nf.dst && 
+                        df.time >= nf.start && 
+                        df.time <= nf.end && 
+                        df.length <= nf.length
+                )
+                if (!matching.isEmpty) {
+                    matching.map(df => (df -> nf))
                 }
-                case _ => throw new Exception
+                else None
             }
+        ).filter(_ != None): RDD[(Flow, NicFlow)]
+        val uniq = matched.union(readFlows.map(x => (x -> null))).reduceByKey(
+            (nf1: NicFlow, nf2: NicFlow) => if (nf1 != null) nf1 else nf2
         )
 
         val readFlowsNoMap = uniq.filter(_._2 == null).map(_._1)

@@ -19,6 +19,7 @@ import pdb
 
 # Graph function takes 2 dicts with structure keys = application name, value = list of flows
 
+keys_sorted = ['wordcount-hadoop', 'wordcount-spark', 'terasort-hadoop', 'terasort-spark', 'graphlab', 'memcached', 'bdb']
 
 # Graph 1: Flow size distribution in \dis and \pdis. All applications go into one figure: multiple lines in the CDF, one for each application. The same thing for \pdis.
 def graph1(pdis, dis):
@@ -29,7 +30,6 @@ def graph1(pdis, dis):
         plt.xlim(1, 1e10)
         plt.ylabel('CDF')
         plt.xlabel('Flow Size, Bytes')
-        keys_sorted = ['wordcount', 'terasort', 'graphlab', 'memcached']
         for app in keys_sorted:
             x, y = cdf([f['size'] for f in apps[app]])
             y[-1] = 1.0
@@ -47,7 +47,6 @@ def graph1(pdis, dis):
 
 # Graph 2: Number of flows in \dis and \pdis. One single bar graph, two bars for each application --- one for #flows in \dis and the other for #flows in \pdis.
 def graph2(pdis, dis):
-    keys_sorted = ['wordcount', 'terasort', 'graphlab', 'memcached']
     pdis_numflows = [len(pdis[k]) for k in keys_sorted]
     dis_numflows = [len(dis[k]) for k in keys_sorted]
 
@@ -69,9 +68,7 @@ def graph2(pdis, dis):
 
 # Graph 4: Flow arrival time distribution in \dis and \pdis. All the applications go into one figure: multiple lines in the CDF, one for each application. The same thing for \pdis.
 def graph4(pdis, dis):
-    return
-    keys_sorted = ['wordcount-hadoop', 'wordcount', 'terasort', 'graphlab', 'memcached']
-
+    #return
     def makeGraph(name, apps):
         plt.cla()
         plt.clf()
@@ -97,7 +94,6 @@ def graph4(pdis, dis):
 
 # Graph 5: Traffic volume in \dis and \pdis. One single bar graph, two bars for each application --- one for volume in \dis and the other for volume in \pdis.
 def graph5(pdis, dis):
-    keys_sorted = ['wordcount', 'terasort', 'graphlab', 'memcached']
     pdis_bytes = [sum(f['size'] for f in pdis[k]) / 1e9 for k in keys_sorted]
     dis_bytes = [sum(f['size'] for f in dis[k]) / 1e9 for k in keys_sorted]
     # pdb.set_trace()
@@ -120,6 +116,11 @@ def graph5(pdis, dis):
 
 # Graph 6: Spatial traffic distribution in \dis and \pdis. A n \times n matrix heat diagram, with cell $(i, j)$ having heat level corresponding to the traffic volume between source i and destination j (aggregated across time). The same thing for \pdis.
 def graph6(pdis, dis):
+    return
+
+    ## we're not doing this.
+
+
     def makeMaps(apps, app):
         flows = apps[app]
         hosts = list(set(int(f['src']) for f in flows) & set(int(f['dst']) for f in flows))
@@ -202,8 +203,8 @@ def graph7(pdis, dis):
         plt.semilogy(xaxis, yaxis, 'b.')
         plt.savefig(name.format(app))
     for app in pdis.keys():
-        makeGraph('graph7alt_temporaltraffic_pdis_{}.pdf', pdis, app)
-        makeGraph('graph7alt_temporaltraffic_dis_{}.pdf', dis, app)
+        makeGraph('graph7_temporaltraffic_pdis_{}.pdf', pdis, app)
+        makeGraph('graph7_temporaltraffic_dis_{}.pdf', dis, app)
     print 'graph7'
     return
 
@@ -220,23 +221,17 @@ def readFlows(filename):
 
 
 def collectAllFlows():
-    apps = ['graphlab', 'old_memcached', 'terasort', 'wordcount-hadoop']
-    apps = [(s, 'results/{}'.format(s)) for s in apps]
-    pdis_file = '{}/nic_flows.txt'
-    dis_file = '{}/res-based_timeonly_flows.txt'
+    apps = ['bdb', 'graphlab', 'terasort_hadoop', 'terasort_spark', 'wordcount_hadoop', 'wordcount_spark']
+    apps = [(s, 'flowgen-spark/results/{}'.format(s)) for s in apps]
+    pdis_file = '{}/nic/part-00000'
+    dis_file = '{}/flows/part-00000'
 
     pdis = {}
     dis = {}
 
     def read(a, a_dir):
-        a_key = a
-        if (a_key == 'old_memcached'):
-            a_key = 'memcached'
-        elif(a_key == 'wordcount-hadoop'):
-            a_key = 'wordcount'
-
-        pdis[a_key] = readFlows(pdis_file.format(a_dir))
-        dis[a_key] = readFlows(dis_file.format(a_dir))
+        pdis[a] = readFlows(pdis_file.format(a_dir))
+        dis[a] = readFlows(dis_file.format(a_dir))
 
     threads = [threading.Thread(target=read, args=a) for a in apps]
     [t.start() for t in threads]
@@ -247,7 +242,7 @@ if __name__ == '__main__':
     pdis, dis = collectAllFlows()
     print 'read flows'
     assert(len(pdis) == len(dis))
-    fns = [graph7]
+    fns = [graph1, graph2, graph4, graph5, graph7]
 
     map(lambda x: x(pdis, dis), fns)
     # threads = [threading.Thread(target=f, args=(pdis, dis)) for f in fns]
