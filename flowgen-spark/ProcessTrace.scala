@@ -31,8 +31,12 @@ object ProcessTrace {
         traces.map(processTrace(_, sc, numPartitions)).map(_ match {
             case (traceName: String, nf: RDD[NicFlow], fs: RDD[Flow]) => {
                 LogHolder.log.warn(s"writing chart data: ${traceName}")
-                fig6abcd(traceName, nf, fs)
-                fig6ef(traceName, nf, fs)
+                try {
+                    fig6abcd(traceName, nf, fs)
+                    fig6ef(traceName, nf, fs)
+                } catch {
+                    case e => LogHolder.log.error(e.toString)
+                }
             }
         })
 
@@ -41,7 +45,11 @@ object ProcessTrace {
 
     def write(fn: String, out:String) = {
         val pw = new java.io.PrintWriter(new File(fn))
-        try pw.write(out) finally pw.close()
+        try pw.write(out) 
+        catch {
+            case e => LogHolder.log.error(e.toString)
+        }
+        finally pw.close()
     }
 
     def fig6abcd(traceName: String, nf: RDD[NicFlow], fs: RDD[Flow]) {
@@ -210,7 +218,8 @@ object ProcessTrace {
                         val start = start_addr.toInt.abs
                         (start to (start + runlength.toInt - 1.toInt)).map(
                             addr => {
-                                val h = (addr / memRange(node)._1.toDouble).toInt * memRange.keys.iterator.length + memRange.keys.iterator.length
+                                val h = ((addr / memRange(node)._1.toDouble) * memRange.keys.iterator.length).toInt + memRange.keys.iterator.length
+                                assert(h >= memRange.keys.iterator.length)
                                 if (start_addr(0) == '-') new Flow(
                                         id = batchid.toInt,
                                         time = time.toDouble / 1e6,
@@ -253,9 +262,11 @@ object ProcessTrace {
         LogHolder.log.warn("finished memory flows")
 
         //collapse flows
-        return collapse(memFlows)
+        //return collapse(memFlows)
+        return memFlows
     }
 
+    /*
     def collapse(flows: RDD[Flow]): RDD[Flow] = {
         LogHolder.log.warn("collapsing")
 
@@ -278,6 +289,7 @@ object ProcessTrace {
                 )
         ).map(_._2).sortBy(_.time)
     }
+    */
 
     def processNicFlows(nicFile: RDD[String], nicHostMapping: Map[String, Int]): RDD[NicFlow] = {
         var nfs = nicFile.map(
@@ -348,7 +360,12 @@ object ProcessTrace {
                 line.split(" ").toList match {
                     case node :: "disk" :: timestamp :: address :: length :: _ :: rw :: Nil => {
                         val addr = address.toInt
-                        val h = (addr / diskRange(node.toInt)._1.toDouble).toInt * 3 + diskRange.keys.iterator.length * 2
+                        val h = (
+                                    (addr / (diskRange(node.toInt)._1.toDouble)) 
+                                    * diskRange.keys.iterator.length
+                                ).toInt 
+                                + diskRange.keys.iterator.length * 2
+                        assert(h >= diskRange.keys.iterator.length * 2 && h <= diskRange.keys.iterator.length * 3)
                         val ts = timestamp.toDouble
                         rw match {
                             //write: node -> h
@@ -356,8 +373,8 @@ object ProcessTrace {
                                 new Flow(
                                     id = 0, 
                                     time = ts, 
-                                    src = node.toInt, 
-                                    dst = h, 
+                                    src = h,  
+                                    dst = node.toInt, 
                                     length = length.toLong * 4096, 
                                     cat = "diskRead", 
                                     node = node.toInt, 
@@ -368,10 +385,10 @@ object ProcessTrace {
                                 new Flow(
                                     id = 0, 
                                     time = ts, 
-                                    src = h,
-                                    dst = node.toInt, 
+                                    src = node.toInt,
+                                    dst = h, 
                                     length = length.toLong * 4096, 
-                                    cat = "diskRead", 
+                                    cat = "diskWrite", 
                                     node = node.toInt, 
                                     addr = addr
                                 )
@@ -443,6 +460,7 @@ object ProcessTrace {
             }
         )
 
-        return collapse(writeFlows.union(readFlowsNoMap).union(readFlowsMapped).sortBy(_.time))
+        //return collapse(writeFlows.union(readFlowsNoMap).union(readFlowsMapped).sortBy(_.time))
+        return writeFlows.union(readFlowsNoMap).union(readFlowsMapped).sortBy(_.time)
     }
 }
