@@ -32,10 +32,11 @@ object ProcessTrace {
             case (traceName: String, nf: RDD[NicFlow], fs: RDD[Flow]) => {
                 LogHolder.log.warn(s"writing chart data: ${traceName}")
                 try {
+                    fs.repartition(numPartitions)
                     fig6abcd(traceName, nf, fs)
                     fig6ef(traceName, nf, fs)
                 } catch {
-                    case e => LogHolder.log.error(e.toString)
+                    case e: Throwable => LogHolder.log.error(e.toString)
                 }
             }
         })
@@ -47,7 +48,7 @@ object ProcessTrace {
         val pw = new java.io.PrintWriter(new File(fn))
         try pw.write(out) 
         catch {
-            case e => LogHolder.log.error(e.toString)
+            case e: Throwable => LogHolder.log.error(e.toString)
         }
         finally pw.close()
     }
@@ -82,11 +83,11 @@ object ProcessTrace {
         // e for fs (dis), f for nf (predis)
 
         val slotDuration = 0.001 // 100 ms
-        nf.sortBy(_.start).map(f => ((f.start / slotDuration).toLong, f.length)).reduceByKey(_ + _).map(_ match {
+        nf.sortBy(_.start).map(f => ((f.start / slotDuration).toLong -> f.length)).reduceByKey(_ + _).map(_ match {
             case (time: Long, volume: Long) => s"${time} ${volume * 8}"
         }).saveAsTextFile(s"/scratch/akshay/disaggregation-flowgen/flowgen-spark/results/${traceName}/fig6f-pdis")
 
-        fs.sortBy(_.time).map(f => ((f.time / slotDuration).toLong, f.length)).reduceByKey(_ + _).map(_ match {
+        fs.sortBy(_.time).map(f => ((f.time / slotDuration).toLong -> f.length)).reduceByKey(_ + _).map(_ match {
             case (time: Long, volume: Long) => s"${time} ${volume * 8}"
         }).saveAsTextFile(s"/scratch/akshay/disaggregation-flowgen/flowgen-spark/results/${traceName}/fig6e-dis")
     }
@@ -128,7 +129,21 @@ object ProcessTrace {
 
         LogHolder.log.warn(s"nic flows: ${nicFlows.count}")
 
-        nicFlows.map(
+        val firstStart = nicFlows.take(1)(0).start
+        nicFlows.zipWithIndex.map(
+            tup => {
+                val nf = tup._1: NicFlow
+                val id = tup._2: Long
+                new NicFlow(
+                    id     = id, 
+                    start  = nf.start - firstStart,
+                    end    = nf.end - firstStart,
+                    src    = nf.src,
+                    dst    = nf.dst,
+                    length = nf.length
+                )
+            }
+        ).map(
             nf => {
                 s"${nf.id} ${"%.6f" format nf.start} ${nf.src} ${nf.dst} ${nf.length}"
             }
@@ -159,8 +174,6 @@ object ProcessTrace {
         
         val combined = mem.union(disk).sortBy(_.time)
 
-        LogHolder.log.warn(s"Total number of flows ${combined.count}")
-
         val startTime = combined.take(1)(0).time
         val allFlows = combined.map(
             f => {
@@ -178,6 +191,7 @@ object ProcessTrace {
         )
 
         allFlows.persist()
+        LogHolder.log.warn(s"Total number of flows ${allFlows.count}")
 
         allFlows.zipWithIndex().map(
             tup => {
@@ -209,7 +223,8 @@ object ProcessTrace {
             (u1, u2) => (Math.max(u1._1, u2._1), Math.min(u1._2, u2._2))
         ).collect.toMap
 
-        // 
+        val numMemNodes = memRange.keys.iterator.length
+
         val memFlows = memFile.flatMap(
             line => {
                 line.split(" ").toList match {
@@ -218,8 +233,8 @@ object ProcessTrace {
                         val start = start_addr.toInt.abs
                         (start to (start + runlength.toInt - 1.toInt)).map(
                             addr => {
-                                val h = ((addr / memRange(node)._1.toDouble) * memRange.keys.iterator.length).toInt + memRange.keys.iterator.length
-                                assert(h >= memRange.keys.iterator.length)
+                                val h = ((addr / memRange(node)._1.toDouble) * numMemNodes).toInt + numMemNodes
+                                assert(h >= numMemNodes && h <= numMemNodes * 2, h.toString)
                                 if (start_addr(0) == '-') new Flow(
                                         id = batchid.toInt,
                                         time = time.toDouble / 1e6,
@@ -292,7 +307,7 @@ object ProcessTrace {
     */
 
     def processNicFlows(nicFile: RDD[String], nicHostMapping: Map[String, Int]): RDD[NicFlow] = {
-        var nfs = nicFile.map(
+        return nicFile.map(
             line => {
                 // start, end, src, dst, length, _
                 line.split(" ").toList match {
@@ -313,21 +328,6 @@ object ProcessTrace {
                 }
             }
         ).filter(f => f.src != -1 && f.dst != -1).sortBy(_.start)
-        val firstStart = nfs.take(1)(0).start
-        nfs.zipWithIndex.map(
-            tup => {
-                val nf = tup._1: NicFlow
-                val id = tup._2: Long
-                new NicFlow(
-                    id     = id, 
-                    start  = nf.start - firstStart,
-                    end    = nf.end - firstStart,
-                    src    = nf.src,
-                    dst    = nf.dst,
-                    length = nf.length
-                )
-            }
-        )
     }
 
     def processDiskFlows(diskFile: RDD[String], nicFlows: RDD[NicFlow], sc: SparkContext): RDD[Flow] = {
@@ -354,18 +354,18 @@ object ProcessTrace {
             (u1, u2) => (Math.max(u1._1, u2._1), Math.min(u1._2, u2._2))
         ).collect.toMap
 
+        val numDiskNodes = diskRange.keys.iterator.length
+        LogHolder.log.warn("num disk nodes: " + numDiskNodes.toString)
+
         // read input into RDD[Flow]
         val diskFlows = diskFile.map(
             line => 
                 line.split(" ").toList match {
                     case node :: "disk" :: timestamp :: address :: length :: _ :: rw :: Nil => {
                         val addr = address.toInt
-                        val h = (
-                                    (addr / (diskRange(node.toInt)._1.toDouble)) 
-                                    * diskRange.keys.iterator.length
-                                ).toInt 
-                                + diskRange.keys.iterator.length * 2
-                        assert(h >= diskRange.keys.iterator.length * 2 && h <= diskRange.keys.iterator.length * 3)
+                        val hf = ((addr / (diskRange(node.toInt)._1.toDouble)) * numDiskNodes).toInt + numDiskNodes * 2
+                        val h = if (hf == numDiskNodes * 3) hf - 1 else hf
+                        assert(h >= numDiskNodes * 2 && h <= numDiskNodes * 3, h.toString + " " + numDiskNodes.toString)
                         val ts = timestamp.toDouble
                         rw match {
                             //write: node -> h
@@ -399,32 +399,34 @@ object ProcessTrace {
         )
 
         val writeFlows = diskFlows.filter(_.cat == "diskWrite")
-        val readFlows = diskFlows.filter(_.cat == "diskRead")
+        val readFlows = diskFlows.filter(_.cat == "diskRead").zipWithIndex
         readFlows.persist
+
+        LogHolder.log.warn("0 num disk reads: " + readFlows.count)
 
         // do source attribution from nic flows
         val readFlows_bv = sc.broadcast(readFlows.collect.toList)
         val matched = nicFlows.flatMap(
             (nf: NicFlow) => {
-                val matching = readFlows_bv.value.filter(
-                    (df: Flow) => 
-                        df.src == nf.dst && 
-                        df.time >= nf.start && 
-                        df.time <= nf.end && 
-                        df.length <= nf.length
-                )
-                if (!matching.isEmpty) {
-                    matching.map(df => (df -> nf))
-                }
-                else None
+                val matching = readFlows_bv.value.filter(_ match {
+                    case (df: Flow, unused: Long) => 
+                        (df.dst == nf.src && df.time >= nf.start && df.time <= nf.end && df.length <= nf.length)
+                }): List[(Flow, Long)]
+                for (tup <- matching) yield (tup._2 -> (tup._1 -> nf))
             }
-        ).filter(_ != None): RDD[(Flow, NicFlow)]
-        val uniq = matched.union(readFlows.map(x => (x -> null))).reduceByKey(
-            (nf1: NicFlow, nf2: NicFlow) => if (nf1 != null) nf1 else nf2
-        )
+        ): RDD[(Long, (Flow, NicFlow))]
+        LogHolder.log.warn("matched: " + matched.count)
+
+        val uniq = matched.union(readFlows.map(x => (x._2 -> (x._1 -> null)))).reduceByKey(
+            (t1: (Flow, NicFlow), t2: (Flow, NicFlow)) => {
+                if (t1._2 != null && t2._2 == null) t1 else t2
+            }
+        ).map(_._2)
+
+        LogHolder.log.warn("1 num disk reads: " + uniq.count)
 
         val readFlowsNoMap = uniq.filter(_._2 == null).map(_._1)
-        LogHolder.log.warn("num disk reads: " + readFlows.count)
+        LogHolder.log.warn("2 num disk reads: " + readFlows.count)
         LogHolder.log.warn("unmatched: " + readFlowsNoMap.count)
         val readFlowsMapped = uniq.filter(_._2 != null).map(t => (t._2 -> (t._1, t._2.length))).aggregateByKey(
             // tuple of selected disk flows, sum of sizes of selected disk flows, total nic flow size
