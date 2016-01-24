@@ -1,6 +1,6 @@
 #!/bin/bash
 
-traces=("../expanded_traces/graphlab/" "../expanded_traces/bdb/" "../expanded_traces/wordcount_hadoop/" "../expanded_traces/terasort_hadoop/" "../expanded_traces/wordcount_spark/" "../expanded_traces/terasort_spark/" "../expanded_traces/timely/")
+traces=("../expanded_traces/bdb/" "../expanded_traces/wordcount_hadoop/" "../expanded_traces/terasort_hadoop/" "../expanded_traces/wordcount_spark/" "../expanded_traces/terasort_spark/" "../expanded_traces/timely/" "../expanded_traces/memcached/")
 
 for tr in ${traces[@]}
 do

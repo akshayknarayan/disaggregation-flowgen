@@ -209,8 +209,10 @@ object ProcessTrace {
         val memRange = memFile.flatMap(
             line => {
                 line.split(" ").toList match {
-                    case node :: "mem" :: _ :: _ :: start_addr :: runlength :: Nil => 
-                        List((node.toInt -> start_addr.toInt), (node.toInt -> (start_addr.toInt + runlength.toInt)))
+                    case node :: "mem" :: _ :: _ :: start_addr :: runlength :: Nil => {
+                        val st_addr = start_addr.toInt.abs
+                        List((node.toInt -> st_addr), (node.toInt -> (st_addr + runlength.toInt)))
+                    }
                     case Nil => throw new Exception("failed match in mem")
                 }
             }
@@ -224,6 +226,7 @@ object ProcessTrace {
         ).collect.toMap
 
         val numMemNodes = memRange.keys.iterator.length
+        LogHolder.log.warn("num mem nodes: " + numMemNodes.toString)
 
         val memFlows = memFile.flatMap(
             line => {
@@ -234,7 +237,7 @@ object ProcessTrace {
                         (start to (start + runlength.toInt - 1.toInt)).map(
                             addr => {
                                 val h = ((addr / memRange(node)._1.toDouble) * numMemNodes).toInt + numMemNodes
-                                assert(h >= numMemNodes && h <= numMemNodes * 2, h.toString)
+                                assert(h >= numMemNodes && h < (numMemNodes * 2), s"${h} ${addr} ${node} ${memRange(node)}")
                                 if (start_addr(0) == '-') new Flow(
                                         id = batchid.toInt,
                                         time = time.toDouble / 1e6,
@@ -363,8 +366,8 @@ object ProcessTrace {
                 line.split(" ").toList match {
                     case node :: "disk" :: timestamp :: address :: length :: _ :: rw :: Nil => {
                         val addr = address.toInt
-                        val hf = ((addr / (diskRange(node.toInt)._1.toDouble)) * numDiskNodes).toInt + numDiskNodes * 2
-                        val h = if (hf == numDiskNodes * 3) hf - 1 else hf
+                        val hf = ((addr / (diskRange(node.toInt)._1.toDouble)) * numDiskNodes).toInt
+                        val h = (((if (hf == numDiskNodes) hf - 1 else hf) + node.toInt) % numDiskNodes) + numDiskNodes * 2
                         assert(h >= numDiskNodes * 2 && h <= numDiskNodes * 3, h.toString + " " + numDiskNodes.toString)
                         val ts = timestamp.toDouble
                         rw match {
@@ -398,6 +401,8 @@ object ProcessTrace {
                 }
         )
 
+        return diskFlows.sortBy(_.time)
+/*
         val writeFlows = diskFlows.filter(_.cat == "diskWrite")
         val readFlows = diskFlows.filter(_.cat == "diskRead").zipWithIndex
         readFlows.persist
@@ -464,5 +469,6 @@ object ProcessTrace {
 
         //return collapse(writeFlows.union(readFlowsNoMap).union(readFlowsMapped).sortBy(_.time))
         return writeFlows.union(readFlowsNoMap).union(readFlowsMapped).sortBy(_.time)
+*/
     }
 }

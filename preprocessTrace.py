@@ -36,6 +36,6 @@ for t in files:
         subprocess.call(cmd, shell=True)
 
     elif "-disk-" in t:
-        cmd = "blkparse {}/{} | egrep -v 'python|tcpdump|blktrace|cat|swap|bash|sh|auditd' | python get_disk_io.py ".format(tracedir, t) + "| awk '{printf \"" + t[0] + " disk %.6f %s %s %s %s \\n\", $2+" + "{:f}".format(offsets[t[0]]) + ", $4, $6, $8, $10}' >> " + "{}/trace".format(destdir)
+        cmd = "blkparse {}/{} | egrep -v 'python|tcpdump|blktrace|cat|swap|bash|sh|auditd|kworker|crond' | python get_disk_io.py ".format(tracedir, t) + "| awk '{printf \"" + t[0] + " disk %.6f %s %s %s %s \\n\", $2+" + "{:f}".format(offsets[t[0]]) + ", $4, $6, $8, $10}' >> " + "{}/trace".format(destdir)
         print(cmd)
         subprocess.call(cmd, shell=True)

@@ -5,6 +5,7 @@ import math
 import itertools
 import random
 import subprocess
+import threading
 
 import pdb
 
@@ -12,8 +13,8 @@ import pdb
 # Create interarrival and size CDFs for each src, dst pair.
 #
 
-def readFlows(filename):
-    with open(filename, 'r') as f:
+def readFlows(flows):
+    with open(flows, 'r') as f:
         for line in f.readlines():
             elem = line.split()
             yield {
@@ -34,11 +35,41 @@ def getInterarrivals(flows):
         t = f['time']
 
 def getSizes(flows):
-    return map(lambda f: f['size'], flows)
+    for f in flows:
+        yield f['size']/8  # /8 because blkparse outputs in 512-byte *sectors*, not 4096-byte *blocks* :'(
 
 # takes list of numbers (not iterator)
 # returns two lists, the same list (xaxis) and cdf value (yaxis)
+# fixed: get cdf, then sample.
 def getCdf(nums):
+    nums.sort()
+    ns = []
+    for k, g in itertools.groupby(nums):
+        ns.append((k, sum(1 for _ in g)))
+    def cumsum(n):
+        tot = 0
+        for i in n:
+            tot += i
+            yield float(tot) / len(nums)
+    yaxis = list(cumsum(t[1] for t in ns))
+
+    if (len(ns) >= 65536):
+        idxs = random.sample([i for i in range(1, length-1)], 65533)
+        idxs.append(0)
+        idxs.append(length-1)
+        idxs.sort()
+        sampled_nums = [ns[i] for i in idxs]
+        sampled_cdf  = [yaxis[i] for i in idxs]
+    else:
+        sampled_nums = ns
+        sampled_cdf = yaxis
+    assert(len(sampled_nums) == len(sampled_cdf))
+    assert sampled_cdf[-1] == 1.0, sampled_cdf[-1]
+    return (sampled_nums, sampled_cdf)
+
+# takes list of numbers (not iterator)
+# returns two lists, the same list (xaxis) and cdf value (yaxis)
+def getCdfOld(nums):
     length = len(nums)
     # cdf with at most 65536 lines
     if (length >= 65536):
@@ -70,25 +101,32 @@ def writeCdf(filename, cdftup):
         for x, y in zip(*cdftup):
             f.write("{} {} {}\n".format(x[0], x[1], y))
 
-fns = sys.argv[1:]
-for fn in fns:
-    print(fn)
+flowfn = sys.argv[1]
+print(flowfn)
 
-    cname = '/'.join(fn.split('/')[:-2]) + '/cdf/'
-    subprocess.call(['mkdir', '-p', cname])
+cname = '/'.join(flowfn.split('/')[:-2]) + '/cdf/'
+subprocess.call(['mkdir', '-p', cname])
 
-    for sd, sdFlowGroup in groupSD(readFlows(fn)):
-        flows = list(sdFlowGroup)
-        print(sd, 'num flows in group', len(flows))
+def processSD(sd, flows):
+    print(sd, 'num flows in group', len(flows))
 
-        if (len(flows) < 3):
-            continue
+    if (len(flows) < 5):
+        return
 
-        inters = list(getInterarrivals(flows))
-        sizes = list(map(lambda i:math.ceil(i/1460), getSizes(flows)))
+    inters = list(getInterarrivals(flows))
+    sizes = list(map(lambda i:math.ceil(i/1460), getSizes(flows)))
 
-        interCdf = getCdf(inters)
-        sizesCdf = getCdf(sizes)
+#    sizes, inters = zip(*getData(flows))
 
-        writeCdf(cname + '{}_{}_sizes.cdf'.format(sd[0], sd[1]), sizesCdf)
-        writeCdf(cname + '{}_{}_interarrivals.cdf'.format(sd[0], sd[1]), interCdf)
+    interCdf = getCdf(inters)
+    sizesCdf = getCdf(sizes)
+
+    writeCdf(cname + '{}_{}_sizes.cdf'.format(sd[0], sd[1]), sizesCdf)
+    writeCdf(cname + '{}_{}_interarrivals.cdf'.format(sd[0], sd[1]), interCdf)
+
+threads = []
+for sd, sdFlowGroup in groupSD(readFlows(flowfn)):
+    threads.append(threading.Thread(target=processSD, args=(sd, list(sdFlowGroup))))
+
+[t.start() for t in threads]
+[t.join() for t in threads]
