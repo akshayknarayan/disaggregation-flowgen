@@ -21,8 +21,9 @@ def readFlows(flows):
                     'src': int(elem[2]),   #1
                     'dst': int(elem[3]),   #2
                     'time': float(elem[1]),#3
-                    'size': int(elem[4])   #4
-                    }
+                    'size': int(elem[4]),   #4
+                    'type': elem[5]
+                  }
 
 def groupSD(flows):
     return itertools.groupby(sorted(flows, key=lambda f: (f['src'], f['dst'])), lambda f: (f['src'], f['dst']))
@@ -36,7 +37,10 @@ def getInterarrivals(flows):
 
 def getSizes(flows):
     for f in flows:
-        yield f['size']/8  # /8 because blkparse outputs in 512-byte *sectors*, not 4096-byte *blocks* :'(
+        if 'mem' in f['type']:
+            yield f['size']
+        else:
+            yield f['size']/8  # /8 because blkparse outputs in 512-byte *sectors*, not 4096-byte *blocks* :'(
 
 # takes list of numbers (not iterator)
 # returns two lists, the same list (xaxis) and cdf value (yaxis)
@@ -54,6 +58,7 @@ def getCdf(nums):
     yaxis = list(cumsum(t[1] for t in ns))
 
     if (len(ns) >= 65536):
+        length = len(ns)
         idxs = random.sample([i for i in range(1, length-1)], 65533)
         idxs.append(0)
         idxs.append(length-1)
