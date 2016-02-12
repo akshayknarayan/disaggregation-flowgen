@@ -28,8 +28,19 @@ def readFlows(flows):
 def groupSD(flows):
     return itertools.groupby(sorted(flows, key=lambda f: (f['src'], f['dst'])), lambda f: (f['src'], f['dst']))
 
+# flows between one sd pair
+def squashCoArrivals(flows):
+    flows.sort(key=lambda f:f['time'])
+    prev = flows[0]
+    for f in flows:
+        if (f['time'] - prev['time'] > 0):
+            yield prev
+            prev = f
+        else:
+            prev['size'] += f['size']
+
+#flows are already sorted in time order
 def getInterarrivals(flows):
-    #flows are already sorted in time order
     t = 0
     for f in flows:
         yield f['time'] - t
@@ -72,35 +83,6 @@ def getCdf(nums):
     assert sampled_cdf[-1] == 1.0, sampled_cdf[-1]
     return (sampled_nums, sampled_cdf)
 
-# takes list of numbers (not iterator)
-# returns two lists, the same list (xaxis) and cdf value (yaxis)
-def getCdfOld(nums):
-    length = len(nums)
-    # cdf with at most 65536 lines
-    if (length >= 65536):
-        nums = random.sample(nums, 65533)
-        nums.append(min(nums))
-        nums.append(max(nums))
-        length = 65535
-    nums.sort()
-
-    ns = []
-    for k, g in itertools.groupby(nums):
-        ns.append((k, sum(1 for _ in g)))
-
-    def cumsum(n):
-        tot = 0
-        for i in n:
-            tot += i
-            yield float(tot) / len(nums)
-    yaxis = list(cumsum(map(lambda t: t[1], ns)))
-
-    assert(len(yaxis) == len(ns))
-    if (yaxis[-1] != 1.0):
-        pdb.set_trace()
-    assert yaxis[-1] == 1.0, yaxis[-1]
-    return (ns, yaxis)
-
 def writeCdf(filename, cdftup):
     with open(filename, 'w') as f:
         for x, y in zip(*cdftup):
@@ -118,10 +100,10 @@ def processSD(sd, flows):
     if (len(flows) < 5):
         return
 
+    flows = list(squashCoArrivals(flows))
+
     inters = list(getInterarrivals(flows))
     sizes = list(map(lambda i:math.ceil(i/1460), getSizes(flows)))
-
-#    sizes, inters = zip(*getData(flows))
 
     interCdf = getCdf(inters)
     sizesCdf = getCdf(sizes)
